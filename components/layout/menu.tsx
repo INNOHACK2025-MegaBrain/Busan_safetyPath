@@ -8,6 +8,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useUIStore } from "@/store/uiStore";
+import MenuList from "./MenuList";
 
 export default function Menu() {
   const { isModalOpen, modalType, closeModal } = useUIStore();
@@ -16,14 +17,12 @@ export default function Menu() {
 
   return (
     <Sheet open={isMenuOpen} onOpenChange={(open) => !open && closeModal()}>
-      <SheetContent>
+      <SheetContent side="bottom">
         <SheetHeader>
-          <SheetTitle>Are you absolutely sure?</SheetTitle>
-          <SheetDescription>
-            This action cannot be undone. This will permanently delete your
-            account and remove your data from our servers.
-          </SheetDescription>
+          <SheetTitle>메뉴</SheetTitle>
+          <SheetDescription>원하는 메뉴를 선택하세요</SheetDescription>
         </SheetHeader>
+        <MenuList />
       </SheetContent>
     </Sheet>
   );
