@@ -1,6 +1,8 @@
 import Image from "next/image";
 import { supabase } from "@/lib/supabase";
 
+import BasicMap from "@/components/KakaoMap";
+
 export default async function Home() {
   // Supabase 연결 테스트
   let connectionStatus = "연결 실패";
@@ -76,6 +78,7 @@ export default async function Home() {
             </p>
           </div>
 
+          <BasicMap />
           <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
             Looking for a starting point or more instructions? Head over to{" "}
             <a
