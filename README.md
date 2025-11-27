@@ -67,5 +67,33 @@ npm run dev
      ```
 
 3. **작은 변경도 즉시 커밋**
+
    - 기능 하나, 사소한 디자인 변경 하나라도 작업 후 바로 커밋합니다.
    - 변경 사항을 쌓아두지 않고 바로 커밋하면, 추적과 협업이 쉬워집니다.
+
+4. **브랜치 전략**
+   - 각자 작업은 반드시 **개인 브랜치**에서 진행합니다.
+   - **main 브랜치에는 직접 커밋 금지**.
+   - 작업 완료 후 Pull Request(PR)를 통해 main 브랜치에 머지해야 합니다.
+5. 개발 완료 시 **feature 브랜치 → main 브랜치 PR 생성**
+6. PR 제목/설명:
+   - 제목: `[feat] SOS 버튼 구현`
+   - 내용: 기능 요약 + 데모 화면 링크 + 확인 방법
+7. 리뷰:
+   - 팀원 1명 이상 승인 필수
+   - 간단히 동작 확인 (지도, SOS, DB 등)
+8. 머지:
+   - GitHub에서 **“Squash and merge”** 권장 → 커밋 히스토리 깔끔
+   - main 브랜치 직접 커밋 금지
+
+---
+
+## 4️⃣ 충돌 최소화 전략
+
+- PR 전에 feature 브랜치 최신 main pull 필수
+
+```bash
+git checkout feature/sos-button
+git fetch origin
+git pull origin main
+```
