@@ -1,7 +1,8 @@
 "use client";
 
-import { Settings, Menu, MapPin } from "lucide-react";
+import { Menu, MapPin } from "lucide-react";
 import { useUIStore } from "@/store/uiStore";
+import { Button } from "../ui/button";
 
 export default function Header() {
   const { openModal } = useUIStore();
@@ -22,13 +23,15 @@ export default function Header() {
 
         {/* 우측 메뉴 */}
         <div className="flex items-center gap-2">
-          <button
+          <Button
             onClick={() => openModal("menu")}
-            className="p-2 rounded-lg hover:bg-accent transition-colors"
+            className="p-2 rounded-lg hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
+            variant="outline"
+            size="icon"
             aria-label="메뉴"
           >
             <Menu className="h-5 w-5 text-foreground" />
-          </button>
+          </Button>
         </div>
       </div>
     </header>
