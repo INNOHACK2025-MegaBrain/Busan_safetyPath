@@ -57,6 +57,14 @@ export default function BasicMap() {
     return [];
   }, [currentPosition, routePath]); // currentPosition과 routePath가 변경될 때마다 경로를 다시 계산
 
+  // 경로의 최종 도착 지점 - routePath가 있으면 마지막 포인트, 없으면 기본 경로의 마지막
+  const finalDestination = useMemo(() => {
+    if (routePath && routePath.length > 0) {
+      return routePath[routePath.length - 1];
+    }
+    return PATH_WAYPOINTS_AND_END[PATH_WAYPOINTS_AND_END.length - 1];
+  }, [routePath]);
+
   useEffect(() => {
     // 현재 위치가 이미 있으면 로딩 완료
     if (currentPosition) {
@@ -117,10 +125,6 @@ export default function BasicMap() {
       </div>
     );
   }
-
-  // 경로의 최종 도착 지점
-  const finalDestination =
-    PATH_WAYPOINTS_AND_END[PATH_WAYPOINTS_AND_END.length - 1];
   return (
     <>
       <AddMapCustomControlStyle />
