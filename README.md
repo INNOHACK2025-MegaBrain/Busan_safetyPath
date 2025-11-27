@@ -88,7 +88,7 @@ npm run dev
 
 ---
 
-## 4️⃣ 충돌 최소화 전략
+## 충돌 최소화 전략
 
 - PR 전에 feature 브랜치 최신 main pull 필수
 
