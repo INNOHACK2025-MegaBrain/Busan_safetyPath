@@ -5,7 +5,7 @@ export default function AddMapCustomControlStyle() {
         position: relative;
         overflow: hidden;
         width: 100%;
-        height: 350px;
+        height: 100%;
       }
       .radius_border {
         border: 1px solid #919191;
