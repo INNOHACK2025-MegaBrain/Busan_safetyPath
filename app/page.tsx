@@ -1,12 +1,10 @@
+"use client";
 import BasicMap from "@/components/common/KakaoMap";
 import Header from "@/components/layout/header";
 import Menu from "@/components/layout/menu";
 import FloatingMenuButton from "@/components/layout/FloatingMenuButton";
 import SearchSheet from "@/components/layout/SearchSheet";
 import RouteSheet from "@/components/layout/RouteSheet";
-"use client";
-
-import BasicMap from "@/components/KakaoMap";
 
 export type Screen = "home" | "riskMap" | "sos" | "mypage";
 

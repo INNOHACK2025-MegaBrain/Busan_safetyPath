@@ -1,15 +1,22 @@
 "use client";
 
 import { User, Settings } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useUIStore } from "@/store/uiStore";
 import MenuItem from "./MenuItem";
 
 export default function MenuList() {
   const { closeModal, openModal } = useUIStore();
+  const router = useRouter();
 
   const handleMenuItemClick = (type: string) => {
     closeModal();
-    openModal(type);
+
+    if (type === "mypage") {
+      router.push("/myPage");
+    } else {
+      openModal(type);
+    }
   };
 
   const menuItems = [
