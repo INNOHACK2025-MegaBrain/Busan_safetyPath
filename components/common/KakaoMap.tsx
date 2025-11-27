@@ -26,28 +26,46 @@ export default function BasicMap() {
   const mapRef = useRef<kakao.maps.Map>(null);
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
 
-  // mapStore에서 center와 destinationInfo 가져오기
-  const { center, setCenter, destinationInfo } = useMapStore();
+  // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
+  const {
+    center,
+    setCenter,
+    destinationInfo,
+    routePath,
+    currentPosition,
+    setCurrentPosition,
+  } = useMapStore();
   const [showOverlay, setShowOverlay] = useState(false);
-
-  const [currentPosition, setCurrentPosition] = useState<Position>({
-    lat: center.lat,
-    lng: center.lng,
-  });
   const [loading, setLoading] = useState(true);
 
-  // 1. 현재 위치와 정의된 경유지/도착지를 합쳐 최종 경로(path)를 동적으로 생성
+  // 1. 경로 생성: routePath가 있으면 사용, 없으면 기본 경로 사용
   const path = useMemo(() => {
-    // 현재 위치를 경로의 첫 번째 지점으로 추가합니다.
-    const fullPath = [currentPosition, ...PATH_WAYPOINTS_AND_END];
+    // 계산된 경로가 있으면 사용
+    if (routePath && routePath.length > 0) {
+      return routePath;
+    }
 
-    return fullPath.map((p) => ({
-      lat: p.lat,
-      lng: p.lng,
-    }));
-  }, [currentPosition]); // currentPosition이 변경될 때마다 경로를 다시 계산
+    // 기본 경로: 현재 위치와 정의된 경유지/도착지를 합쳐 최종 경로 생성
+    if (currentPosition) {
+      const fullPath = [currentPosition, ...PATH_WAYPOINTS_AND_END];
+      return fullPath.map((p) => ({
+        lat: p.lat,
+        lng: p.lng,
+      }));
+    }
+
+    return [];
+  }, [currentPosition, routePath]); // currentPosition과 routePath가 변경될 때마다 경로를 다시 계산
 
   useEffect(() => {
+    // 현재 위치가 이미 있으면 로딩 완료
+    if (currentPosition) {
+      queueMicrotask(() => {
+        setLoading(false);
+      });
+      return;
+    }
+
     // 현재 위치 가져오기
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -62,18 +80,26 @@ export default function BasicMap() {
         },
         (error) => {
           console.error("위치 정보를 가져올 수 없습니다:", error);
-          setCurrentPosition(center);
+          const fallbackPosition = {
+            lat: center.lat,
+            lng: center.lng,
+          };
+          setCurrentPosition(fallbackPosition);
           setLoading(false);
         }
       );
     } else {
       console.error("Geolocation을 지원하지 않는 브라우저입니다.");
       queueMicrotask(() => {
-        setCurrentPosition(center);
+        const fallbackPosition = {
+          lat: center.lat,
+          lng: center.lng,
+        };
+        setCurrentPosition(fallbackPosition);
         setLoading(false);
       });
     }
-  }, [center, setCenter]);
+  }, [center, setCenter, currentPosition, setCurrentPosition]);
 
   // mapStore의 center가 변경될 때 지도 이동
   useEffect(() => {

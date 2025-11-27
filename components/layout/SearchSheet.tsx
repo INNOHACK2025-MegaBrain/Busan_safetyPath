@@ -23,7 +23,7 @@ interface PlaceResult {
 
 export default function SearchSheet() {
   useKakaoLoader();
-  const { isModalOpen, modalType, closeModal } = useUIStore();
+  const { isModalOpen, modalType, closeModal, openModal } = useUIStore();
   const { setCenter, setSelectedEnd, setDestinationInfo } = useMapStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
@@ -79,7 +79,8 @@ export default function SearchSheet() {
       road_address_name: place.road_address_name,
       coord,
     });
-    closeModal();
+    closeModal(); // 검색 Sheet 닫기
+    openModal("route"); // 길찾기 Sheet 열기
     setSearchQuery("");
     setResults([]);
   };

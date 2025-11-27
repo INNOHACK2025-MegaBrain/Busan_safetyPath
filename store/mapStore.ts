@@ -20,6 +20,7 @@ interface MapStore {
   currentPosition: Coord | null;
 
   destinationInfo: DestinationInfo | null;
+  routePath: Coord[] | null; // 계산된 경로
   weights: {
     cctv: number;
     crime: number;
@@ -32,6 +33,7 @@ interface MapStore {
   setSelectedStart: (coord: Coord) => void;
   setSelectedEnd: (coord: Coord) => void;
   setDestinationInfo: (info: DestinationInfo | null) => void;
+  setRoutePath: (path: Coord[] | null) => void;
   setWeight: (key: keyof MapStore["weights"], value: number) => void;
   resetSelectedPoints: () => void;
 }
@@ -41,6 +43,7 @@ export const useMapStore = create<MapStore>((set) => ({
   level: 5,
   selectedPoint: {},
   destinationInfo: null,
+  routePath: null,
   weights: {
     cctv: 1,
     crime: 1,
@@ -63,6 +66,7 @@ export const useMapStore = create<MapStore>((set) => ({
     })),
 
   setDestinationInfo: (info) => set({ destinationInfo: info }),
+  setRoutePath: (path) => set({ routePath: path }),
 
   setWeight: (key, value) =>
     set((state) => ({
