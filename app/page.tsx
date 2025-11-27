@@ -4,8 +4,13 @@ import Menu from "@/components/layout/menu";
 import FloatingMenuButton from "@/components/layout/FloatingMenuButton";
 import SearchSheet from "@/components/layout/SearchSheet";
 import RouteSheet from "@/components/layout/RouteSheet";
+"use client";
 
-export default async function Home() {
+import BasicMap from "@/components/KakaoMap";
+
+export type Screen = "home" | "riskMap" | "sos" | "mypage";
+
+export default function Home() {
   return (
     <div className="w-full h-screen flex flex-col">
       <Header />
