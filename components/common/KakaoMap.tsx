@@ -6,7 +6,6 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
 import { MapMarker } from "react-kakao-maps-sdk";
 import { Navigation } from "lucide-react";
-import { useMapStore } from "@/store/mapStore";
 
 interface Position {
   lat: number;
@@ -26,12 +25,9 @@ export default function BasicMap() {
   const mapRef = useRef<kakao.maps.Map>(null);
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
 
-  // mapStore에서 center와 level 가져오기
-  const { center, level, setCenter, setLevel } = useMapStore();
-
   const [currentPosition, setCurrentPosition] = useState<Position>({
-    lat: center.lat,
-    lng: center.lng,
+    lat: 33.450701, // 기본값 (제주도)
+    lng: 126.570667,
   });
   const [loading, setLoading] = useState(true);
 
@@ -51,30 +47,25 @@ export default function BasicMap() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const newPosition = {
+          setCurrentPosition({
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-          };
-          setCurrentPosition(newPosition);
-          // 현재 위치를 mapStore의 center로도 설정
-          setCenter(newPosition);
+          });
           setLoading(false);
         },
         (error) => {
           console.error("위치 정보를 가져올 수 없습니다:", error);
-          // 기본값을 mapStore의 center로 설정
-          setCurrentPosition(center);
           setLoading(false);
+          // 기본값 유지
         }
       );
     } else {
       console.error("Geolocation을 지원하지 않는 브라우저입니다.");
       queueMicrotask(() => {
-        setCurrentPosition(center);
         setLoading(false);
       });
     }
-  }, [center, setCenter]);
+  }, []);
 
   if (loading) {
     return (
@@ -94,8 +85,8 @@ export default function BasicMap() {
         <Map
           id="map"
           center={{
-            lat: center.lat,
-            lng: center.lng,
+            lat: currentPosition.lat,
+            lng: currentPosition.lng,
           }}
           style={{
             width: "100%",
@@ -103,19 +94,9 @@ export default function BasicMap() {
             position: "relative",
             overflow: "hidden",
           }}
-          level={level}
+          level={3}
           mapTypeId={mapType === "roadmap" ? "ROADMAP" : "HYBRID"}
           ref={mapRef}
-          onCenterChanged={(map) => {
-            const center = map.getCenter();
-            setCenter({
-              lat: center.getLat(),
-              lng: center.getLng(),
-            });
-          }}
-          onZoomChanged={(map) => {
-            setLevel(map.getLevel());
-          }}
         >
           {!!currentPosition && (
             <CustomOverlayMap position={currentPosition}>
