@@ -24,7 +24,7 @@ interface PlaceResult {
 export default function SearchSheet() {
   useKakaoLoader();
   const { isModalOpen, modalType, closeModal } = useUIStore();
-  const { setCenter, setSelectedEnd } = useMapStore();
+  const { setCenter, setSelectedEnd, setDestinationInfo } = useMapStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -73,6 +73,12 @@ export default function SearchSheet() {
     
     setCenter(coord);
     setSelectedEnd(coord);
+    setDestinationInfo({
+      place_name: place.place_name,
+      address_name: place.address_name,
+      road_address_name: place.road_address_name,
+      coord,
+    });
     closeModal();
     setSearchQuery("");
     setResults([]);

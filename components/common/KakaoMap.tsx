@@ -5,7 +5,7 @@ import useKakaoLoader from "@/hooks/useKakaoLoader";
 import { useRef, useState, useEffect, useMemo } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
 import { MapMarker } from "react-kakao-maps-sdk";
-import { Navigation } from "lucide-react";
+import { Navigation, MapPin, X } from "lucide-react";
 import { useMapStore } from "@/store/mapStore";
 
 interface Position {
@@ -26,8 +26,9 @@ export default function BasicMap() {
   const mapRef = useRef<kakao.maps.Map>(null);
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
 
-  // mapStore에서 center 가져오기
-  const { center, setCenter } = useMapStore();
+  // mapStore에서 center와 destinationInfo 가져오기
+  const { center, setCenter, destinationInfo } = useMapStore();
+  const [showOverlay, setShowOverlay] = useState(false);
 
   const [currentPosition, setCurrentPosition] = useState<Position>({
     lat: center.lat,
@@ -152,6 +153,54 @@ export default function BasicMap() {
               options: { offset: { x: 16, y: 34 } },
             }}
           />
+
+          {/* 4. 검색한 목적지 마커 */}
+          {destinationInfo && (
+            <>
+              <MapMarker
+                position={destinationInfo.coord}
+                onClick={() => setShowOverlay(true)}
+              />
+              {showOverlay && (
+                <CustomOverlayMap
+                  position={destinationInfo.coord}
+                  yAnchor={1.5}
+                >
+                  <div className="bg-background border border-border rounded-lg shadow-lg p-4 min-w-[200px] max-w-[300px]">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-primary shrink-0" />
+                        <h3 className="font-semibold text-foreground text-sm">
+                          {destinationInfo.place_name}
+                        </h3>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowOverlay(false);
+                        }}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      {destinationInfo.road_address_name && (
+                        <p className="flex items-start gap-1">
+                          <span className="font-medium">도로명:</span>
+                          <span>{destinationInfo.road_address_name}</span>
+                        </p>
+                      )}
+                      <p className="flex items-start gap-1">
+                        <span className="font-medium">지번:</span>
+                        <span>{destinationInfo.address_name}</span>
+                      </p>
+                    </div>
+                  </div>
+                </CustomOverlayMap>
+              )}
+            </>
+          )}
         </Map>
         <div className="custom_typecontrol radius_border">
           <span
