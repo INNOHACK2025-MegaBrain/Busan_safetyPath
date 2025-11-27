@@ -1,10 +1,11 @@
 "use client";
 
-import { Map, Polyline } from "react-kakao-maps-sdk";
+import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import useKakaoLoader from "@/hooks/useKakaoLoader";
 import { useRef, useState, useEffect, useMemo } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
 import { MapMarker } from "react-kakao-maps-sdk";
+import { Navigation } from "lucide-react";
 
 interface Position {
   lat: number;
@@ -98,7 +99,16 @@ export default function BasicMap() {
           ref={mapRef}
         >
           {!!currentPosition && (
-            <MapMarker position={currentPosition} title="현재 위치" />
+            <CustomOverlayMap position={currentPosition}>
+              <div className="relative">
+                <div className="w-12 h-12 rounded-full bg-primary/20 animate-ping absolute inset-0" />
+                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center relative">
+                  <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                    <Navigation className="h-3 w-3 text-primary-foreground" />
+                  </div>
+                </div>
+              </div>
+            </CustomOverlayMap>
           )}
           {/* 2. 최적 경로 Polyline */}
           <Polyline
