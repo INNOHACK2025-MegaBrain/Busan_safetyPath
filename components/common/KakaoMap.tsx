@@ -6,6 +6,7 @@ import { useRef, useState, useEffect, useMemo } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
 import { MapMarker } from "react-kakao-maps-sdk";
 import { Navigation } from "lucide-react";
+import { useMapStore } from "@/store/mapStore";
 
 interface Position {
   lat: number;
@@ -25,9 +26,12 @@ export default function BasicMap() {
   const mapRef = useRef<kakao.maps.Map>(null);
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
 
+  // mapStore에서 center 가져오기
+  const { center, setCenter } = useMapStore();
+
   const [currentPosition, setCurrentPosition] = useState<Position>({
-    lat: 33.450701, // 기본값 (제주도)
-    lng: 126.570667,
+    lat: center.lat,
+    lng: center.lng,
   });
   const [loading, setLoading] = useState(true);
 
@@ -47,25 +51,37 @@ export default function BasicMap() {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setCurrentPosition({
+          const newPosition = {
             lat: position.coords.latitude,
             lng: position.coords.longitude,
-          });
+          };
+          setCurrentPosition(newPosition);
+          setCenter(newPosition);
           setLoading(false);
         },
         (error) => {
           console.error("위치 정보를 가져올 수 없습니다:", error);
+          setCurrentPosition(center);
           setLoading(false);
-          // 기본값 유지
         }
       );
     } else {
       console.error("Geolocation을 지원하지 않는 브라우저입니다.");
       queueMicrotask(() => {
+        setCurrentPosition(center);
         setLoading(false);
       });
     }
-  }, []);
+  }, [center, setCenter]);
+
+  // mapStore의 center가 변경될 때 지도 이동
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    const moveLatLon = new kakao.maps.LatLng(center.lat, center.lng);
+    map.setCenter(moveLatLon);
+  }, [center]);
 
   if (loading) {
     return (
@@ -85,8 +101,8 @@ export default function BasicMap() {
         <Map
           id="map"
           center={{
-            lat: currentPosition.lat,
-            lng: currentPosition.lng,
+            lat: center.lat,
+            lng: center.lng,
           }}
           style={{
             width: "100%",
@@ -97,6 +113,13 @@ export default function BasicMap() {
           level={3}
           mapTypeId={mapType === "roadmap" ? "ROADMAP" : "HYBRID"}
           ref={mapRef}
+          onCenterChanged={(map) => {
+            const centerPos = map.getCenter();
+            setCenter({
+              lat: centerPos.getLat(),
+              lng: centerPos.getLng(),
+            });
+          }}
         >
           {!!currentPosition && (
             <CustomOverlayMap position={currentPosition}>
