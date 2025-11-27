@@ -1,4 +1,4 @@
-import BasicMap from "@/components/KakaoMap";
+import BasicMap from "@/components/common/KakaoMap";
 
 export default async function Home() {
   return (
