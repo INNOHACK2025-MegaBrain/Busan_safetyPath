@@ -125,23 +125,6 @@ export default function AuthModal() {
                   />
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="phone">전화번호</Label>
-                <div className="relative">
-                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="phone"
-                    type="tel"
-                    placeholder="010-1234-5678"
-                    value={formData.phone}
-                    onChange={(e) =>
-                      setFormData({ ...formData, phone: e.target.value })
-                    }
-                    className="pl-10"
-                  />
-                </div>
-              </div>
             </>
           )}
 
@@ -182,11 +165,7 @@ export default function AuthModal() {
             </div>
           </div>
 
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={isLoading}
-          >
+          <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -215,4 +194,3 @@ export default function AuthModal() {
     </Dialog>
   );
 }
-
