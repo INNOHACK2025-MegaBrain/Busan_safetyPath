@@ -25,6 +25,29 @@ export async function POST(request) {
     // 2. 거리 계산
     const distance = calculateDistance(start.lat, start.lng, end.lat, end.lng);
 
+    // 최대 거리 제한 (예: 100km)
+    const MAX_DISTANCE = 100;
+    if (distance > MAX_DISTANCE) {
+      console.log(
+        `거리가 ${distance.toFixed(
+          2
+        )}km로 최대 거리(${MAX_DISTANCE}km)를 초과했습니다.`
+      );
+      return NextResponse.json(
+        {
+          error: "거리 제한 초과",
+          message: "너무 먼 거리의 경로를 선택하셨습니다.",
+          details: {
+            distance: distance.toFixed(2) + "km",
+            maxDistance: MAX_DISTANCE + "km",
+            start,
+            end,
+          },
+        },
+        { status: 400 }
+      );
+    }
+
     // 3. 거리에 따라 적절한 프로필 선택
     // 도보는 10km 이하의 짧은 거리만 사용
     // 10km 초과면 자동차 프로필 사용 (안심길 우선은 가중치로 처리)
