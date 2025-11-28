@@ -18,6 +18,7 @@ import {
 import { useMapStore } from "@/store/mapStore";
 import { useUIStore } from "@/store/uiStore";
 import { Toggle } from "@/components/ui/toggle";
+import HeatmapLayer from "./HeatmapLayer";
 
 export default function BasicMap() {
   useKakaoLoader();
@@ -27,10 +28,6 @@ export default function BasicMap() {
   const [visualizationMode, setVisualizationMode] = useState<
     "none" | "markers" | "cluster" | "heatmap"
   >("none"); // 기본값은 none 유지
-
-  // state 추가 (27줄 근처)
-  const [clustererInstance, setClustererInstance] =
-    useState<kakao.maps.MarkerClusterer | null>(null);
 
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
   const {
@@ -271,106 +268,6 @@ export default function BasicMap() {
     };
   }, [setSecurityLights, loading, mapInstance]);
 
-  // 보안등 밀도 계산 및 Zone 오버레이
-  useEffect(() => {
-    const map = mapInstance || mapRef.current;
-    if (!map || !securityLights || securityLights.length === 0) {
-      return;
-    }
-
-    // 그리드 기반 밀도 계산
-    const calculateDensity = () => {
-      const bounds = map.getBounds();
-      if (!bounds) return;
-
-      const swLatLng = bounds.getSouthWest();
-      const neLatLng = bounds.getNorthEast();
-      const gridSize = 20; // 20x20 그리드
-      const latStep = (neLatLng.getLat() - swLatLng.getLat()) / gridSize;
-      const lngStep = (neLatLng.getLng() - swLatLng.getLng()) / gridSize;
-
-      const grid: Array<{
-        sw: { lat: number; lng: number };
-        ne: { lat: number; lng: number };
-        count: number;
-      }> = [];
-
-      // 각 그리드 셀에 보안등 개수 계산
-      for (let i = 0; i < gridSize; i++) {
-        for (let j = 0; j < gridSize; j++) {
-          const swLat = swLatLng.getLat() + i * latStep;
-          const swLng = swLatLng.getLng() + j * lngStep;
-          const neLat = swLat + latStep;
-          const neLng = swLng + lngStep;
-
-          const count = securityLights.filter(
-            (light) =>
-              light.latitude >= swLat &&
-              light.latitude < neLat &&
-              light.longitude >= swLng &&
-              light.longitude < neLng
-          ).length;
-
-          grid.push({
-            sw: { lat: swLat, lng: swLng },
-            ne: { lat: neLat, lng: neLng },
-            count,
-          });
-        }
-      }
-
-      return grid;
-    };
-
-    const grid = calculateDensity();
-    if (!grid) return;
-
-    // 오버레이 생성
-    const overlays: kakao.maps.CustomOverlay[] = [];
-
-    grid.forEach((cell) => {
-      if (cell.count === 0) return; // 보안등이 없는 셀은 표시하지 않음
-
-      // 밀도에 따라 색상 결정
-      const maxCount = Math.max(...grid.map((g) => g.count));
-      const density = cell.count / maxCount;
-
-      // Green Zone: 밀도 높음, Grey Zone: 밀도 낮음
-      const color =
-        density > 0.5
-          ? `rgba(34, 197, 94, ${density * 0.3})` // Green Zone
-          : `rgba(107, 114, 128, ${density * 0.2})`; // Grey Zone
-
-      const overlay = new kakao.maps.CustomOverlay({
-        content: `<div style="width:100%;height:100%;background:${color};"></div>`,
-        position: new kakao.maps.LatLng(
-          (cell.sw.lat + cell.ne.lat) / 2,
-          (cell.sw.lng + cell.ne.lng) / 2
-        ),
-        xAnchor: 0.5,
-        yAnchor: 0.5,
-      });
-
-      // 사각형 영역을 표시하기 위해 커스텀 오버레이 사용
-      const rect = new kakao.maps.Rectangle({
-        bounds: new kakao.maps.LatLngBounds(
-          new kakao.maps.LatLng(cell.sw.lat, cell.sw.lng),
-          new kakao.maps.LatLng(cell.ne.lat, cell.ne.lng)
-        ),
-        fillColor: color,
-        fillOpacity: 0.3,
-        strokeWeight: 0,
-      });
-
-      rect.setMap(map);
-      overlays.push(overlay);
-    });
-
-    return () => {
-      overlays.forEach((overlay) => overlay.setMap(null));
-    };
-  }, [mapInstance, securityLights]);
-
   // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
   const renderMarkers = () => {
     if (!securityLights || securityLights.length === 0) return null;
@@ -408,128 +305,6 @@ export default function BasicMap() {
         );
       });
   };
-
-  // 클러스터 모드 변경 시 클러스터 제거 (renderMarkers 함수 전에 추가)
-  useEffect(() => {
-    const map = mapInstance || mapRef.current;
-    if (!map) return;
-
-    // 클러스터 모드가 아닐 때 클러스터 제거
-    if (visualizationMode !== "cluster") {
-      // 카카오맵의 모든 마커를 제거하는 방법
-      // MarkerClusterer가 내부적으로 관리하므로,
-      // 모드가 변경되면 React가 자동으로 언마운트하지만
-      // 혹시 모를 경우를 대비해 명시적으로 처리
-      // 지도에서 모든 오버레이 제거 (클러스터 마커 포함)
-      // 주의: 이 방법은 다른 오버레이도 제거할 수 있으므로 신중하게 사용
-    }
-  }, [mapInstance, visualizationMode]);
-
-  // 클러스터 모드 관리 useEffect 추가 (renderMarkers 함수 전에)
-  useEffect(() => {
-    const map = mapInstance || mapRef.current;
-    if (!map) return;
-
-    // 클러스터 모드가 아니면 기존 클러스터 제거
-    if (visualizationMode !== "cluster") {
-      if (clustererInstance) {
-        clustererInstance.clear();
-        setClustererInstance(null);
-      }
-      return;
-    }
-
-    // 클러스터 모드이고 보안등 데이터가 있을 때만 클러스터 생성
-    if (!securityLights || securityLights.length === 0) return;
-
-    // 기존 클러스터가 있으면 먼저 제거
-    if (clustererInstance) {
-      clustererInstance.clear();
-    }
-
-    // 마커 배열 생성
-    const markers = securityLights
-      .filter((light) => {
-        return (
-          light.latitude &&
-          light.longitude &&
-          typeof light.latitude === "number" &&
-          typeof light.longitude === "number" &&
-          !isNaN(light.latitude) &&
-          !isNaN(light.longitude)
-        );
-      })
-      .map((light) => {
-        const title =
-          light.address_lot ||
-          `${light.si_do || ""} ${light.si_gun_gu || ""} ${
-            light.eup_myeon_dong || ""
-          }`.trim() ||
-          "보안등";
-
-        return new kakao.maps.Marker({
-          position: new kakao.maps.LatLng(light.latitude, light.longitude),
-          image: new kakao.maps.MarkerImage(
-            "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
-            new kakao.maps.Size(24, 35)
-          ),
-          title: title,
-        });
-      });
-
-    // 클러스터 생성
-    const clusterer = new kakao.maps.MarkerClusterer({
-      map: map,
-      markers: markers,
-      averageCenter: true,
-      minLevel: 6,
-      calculator: [10, 30, 50],
-      styles: [
-        {
-          width: "30px",
-          height: "30px",
-          background: "rgba(59, 130, 246, 0.8)",
-          borderRadius: "50%",
-          color: "#fff",
-          textAlign: "center",
-          lineHeight: "30px",
-          fontWeight: "bold",
-          border: "1px solid rgba(59, 130, 246, 1)",
-        },
-        {
-          width: "40px",
-          height: "40px",
-          background: "rgba(245, 158, 11, 0.8)",
-          borderRadius: "50%",
-          color: "#fff",
-          textAlign: "center",
-          lineHeight: "40px",
-          fontWeight: "bold",
-          border: "1px solid rgba(245, 158, 11, 1)",
-        },
-        {
-          width: "50px",
-          height: "50px",
-          background: "rgba(239, 68, 68, 0.8)",
-          borderRadius: "50%",
-          color: "#fff",
-          textAlign: "center",
-          lineHeight: "50px",
-          fontWeight: "bold",
-          border: "1px solid rgba(239, 68, 68, 1)",
-        },
-      ],
-    });
-
-    setClustererInstance(clusterer);
-
-    // 클린업
-    return () => {
-      if (clusterer) {
-        clusterer.clear();
-      }
-    };
-  }, [mapInstance, visualizationMode, securityLights]);
 
   if (loading) {
     return (
@@ -598,13 +373,62 @@ export default function BasicMap() {
           {/* none 모드일 때는 아무것도 렌더링하지 않음 */}
 
           {/* 클러스터 모드 */}
-          {/* 클러스터는 useEffect에서 직접 관리하므로 여기서는 렌더링하지 않음 */}
-          {visualizationMode === "cluster" && null}
+          {visualizationMode === "cluster" && (
+            <MarkerClusterer
+              averageCenter={true}
+              minLevel={6}
+              // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수 (기본값 사용해도 됨)
+              // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
+              styles={[
+                {
+                  // 1단계 (개수가 적을 때)
+                  width: "30px",
+                  height: "30px",
+                  background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
+                  borderRadius: "50%",
+                  color: "#fff",
+                  textAlign: "center",
+                  lineHeight: "30px",
+                  fontWeight: "bold",
+                  border: "1px solid rgba(59, 130, 246, 1)",
+                },
+                {
+                  // 2단계 (개수가 중간일 때)
+                  width: "40px",
+                  height: "40px",
+                  background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
+                  borderRadius: "50%",
+                  color: "#fff",
+                  textAlign: "center",
+                  lineHeight: "40px",
+                  fontWeight: "bold",
+                  border: "1px solid rgba(245, 158, 11, 1)",
+                },
+                {
+                  // 3단계 (개수가 많을 때)
+                  width: "50px",
+                  height: "50px",
+                  background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
+                  borderRadius: "50%",
+                  color: "#fff",
+                  textAlign: "center",
+                  lineHeight: "50px",
+                  fontWeight: "bold",
+                  border: "1px solid rgba(239, 68, 68, 1)",
+                },
+              ]}
+            >
+              {renderMarkers()}
+            </MarkerClusterer>
+          )}
 
           {/* 마커 모드 */}
           {visualizationMode === "markers" && renderMarkers()}
 
-          {/* 히트맵 모드일 때는 useEffect에서 사각형을 그렸으므로 여기서는 아무것도 안 함 */}
+          {/* 히트맵 모드 */}
+          {visualizationMode === "heatmap" && securityLights.length > 0 && (
+            <HeatmapLayer data={securityLights} />
+          )}
 
           {/* 4. 검색한 목적지 마커 */}
           {destinationInfo && (
