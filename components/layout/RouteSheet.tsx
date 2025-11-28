@@ -8,26 +8,6 @@ import { MapPin, Loader2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import useKakaoLoader from "@/hooks/useKakaoLoader";
 
-interface RouteRoad {
-  vertexes?: number[];
-  [key: string]: unknown;
-}
-
-interface RouteSection {
-  roads?: RouteRoad[];
-  [key: string]: unknown;
-}
-
-interface RouteData {
-  sections?: RouteSection[];
-  [key: string]: unknown;
-}
-
-interface RouteResponse {
-  routes?: RouteData[];
-  [key: string]: unknown;
-}
-
 export default function RouteSheet() {
   useKakaoLoader();
   const { isModalOpen, modalType, closeModal } = useUIStore();
@@ -65,54 +45,58 @@ export default function RouteSheet() {
     setIsCalculating(true);
 
     try {
-      const apiKey = process.env.NEXT_PUBLIC_KAKAO_MAP_API_KEY;
-      if (!apiKey) {
-        console.error("카카오맵 API 키가 없습니다");
-        alert("API 키가 설정되지 않았습니다.");
-        setIsCalculating(false);
-        return;
-      }
-
+      // mapStore에서 weights 가져오기
       const { weights } = useMapStore.getState();
 
-      // REST API를 사용한 경로 계산
-      const origin = `${currentPosition.lng},${currentPosition.lat}`;
-      const destination = `${destinationInfo.coord.lng},${destinationInfo.coord.lat}`;
-
-      // 여러 경로 옵션을 가져와서 안심길 우선으로 필터링
-      const url = `https://apis-navi.kakaomobility.com/v1/directions?origin=${origin}&destination=${destination}&waypoints=&priority=RECOMMEND&alternatives=true&road_details=true`;
-
-      console.log("경로 계산 요청:", { origin, destination });
-
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `KakaoAK ${apiKey}`,
-        },
+      // GraphHopper API를 사용한 경로 계산
+      const response = await fetch("/api/get-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start: {
+            lat: currentPosition.lat,
+            lng: currentPosition.lng,
+          },
+          end: {
+            lat: destinationInfo.coord.lat,
+            lng: destinationInfo.coord.lng,
+          },
+          weights, // weights 전달
+        }),
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error("경로 계산 API 오류:", response.status, errorText);
+        const errorData = await response.json();
+        console.error("경로 계산 API 오류:", response.status, errorData);
         alert("경로를 찾을 수 없습니다. 다른 경로를 시도해주세요.");
         setIsCalculating(false);
         return;
       }
 
-      const data: RouteResponse = await response.json();
+      const data = await response.json();
       console.log("경로 계산 응답:", data);
 
-      if (data.routes && data.routes.length > 0) {
-        // 여러 경로 중 안심길 우선 경로 선택
-        const bestRoute = selectSafeRoute(data.routes, weights);
+      // 에러 응답 확인
+      if (data.error) {
+        console.error("경로 계산 에러:", data);
+        alert(
+          `${data.error}\n${
+            data.message || ""
+          }\n\n지하철역의 경우 지상 출입구 좌표를 사용해주세요.`
+        );
+        setIsCalculating(false);
+        return;
+      }
 
-        if (!bestRoute) {
-          console.error("적합한 경로를 찾을 수 없습니다");
-          alert("안전한 경로를 찾을 수 없습니다.");
-          setIsCalculating(false);
-          return;
-        }
+      // GraphHopper 응답 구조: data.paths[0].points.coordinates
+      if (data.paths && data.paths[0] && data.paths[0].points) {
+        const rawPoints = data.paths[0].points.coordinates;
 
-        const path = extractPathFromRoute(bestRoute);
+        // GraphHopper는 [lng, lat] 형식이므로 [lat, lng]로 변환
+        const path = rawPoints.map((point: [number, number]) => ({
+          lat: point[1],
+          lng: point[0],
+        }));
 
         if (path.length > 0) {
           console.log("경로 계산 완료:", path.length, "개 포인트");
@@ -134,8 +118,11 @@ export default function RouteSheet() {
           alert("경로 정보를 처리할 수 없습니다.");
         }
       } else {
-        console.error("경로를 찾을 수 없습니다");
-        alert("경로를 찾을 수 없습니다.");
+        console.error("경로를 찾을 수 없습니다:", data);
+        const errorMsg =
+          data.message ||
+          "GraphHopper가 해당 지역의 경로를 찾을 수 없습니다.\n지하철역의 경우 지상 출입구 좌표를 사용해주세요.";
+        alert(errorMsg);
       }
 
       setIsCalculating(false);
@@ -145,50 +132,6 @@ export default function RouteSheet() {
       setIsCalculating(false);
     }
   };
-
-  // 안심길 우선 경로 선택 함수
-  function selectSafeRoute(
-    routes: RouteData[],
-    weights: { cctv: number; crime: number; light: number; roadSafety: number }
-  ): RouteData | null {
-    // TODO: 실제 안심길 데이터(CCTV, 범죄율, 조명, 도로 안전도)를 기반으로
-    // 각 경로를 평가하고 가장 안전한 경로를 선택하는 로직 구현
-
-    // 현재는 첫 번째 경로를 반환하지만,
-    // 향후 각 경로의 도로 정보를 분석하여 weights를 고려한 점수를 계산해야 함
-
-    return routes[0] || null;
-  }
-
-  // 경로 좌표 추출 함수
-  function extractPathFromRoute(
-    route: RouteData
-  ): Array<{ lat: number; lng: number }> {
-    const path: Array<{ lat: number; lng: number }> = [];
-
-    if (route.sections && route.sections.length > 0) {
-      route.sections.forEach((section: RouteSection) => {
-        if (section.roads && Array.isArray(section.roads)) {
-          section.roads.forEach((road: RouteRoad) => {
-            if (road.vertexes && Array.isArray(road.vertexes)) {
-              const vertexes = road.vertexes;
-              // vertexes는 [lng, lat, lng, lat, ...] 형식
-              for (let i = 0; i < vertexes.length; i += 2) {
-                if (i + 1 < vertexes.length) {
-                  path.push({
-                    lng: vertexes[i],
-                    lat: vertexes[i + 1],
-                  });
-                }
-              }
-            }
-          });
-        }
-      });
-    }
-
-    return path;
-  }
 
   if (!destinationInfo) {
     return null;
