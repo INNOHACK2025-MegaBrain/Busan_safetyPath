@@ -11,7 +11,12 @@ import useKakaoLoader from "@/hooks/useKakaoLoader";
 export default function RouteSheet() {
   useKakaoLoader();
   const { isModalOpen, modalType, closeModal } = useUIStore();
-  const { destinationInfo, currentPosition, setRoutePath } = useMapStore();
+  const {
+    destinationInfo,
+    currentPosition,
+    setRoutePath,
+    setShowDestinationOverlay,
+  } = useMapStore();
   const [isCalculating, setIsCalculating] = useState(false);
 
   const isRouteOpen = isModalOpen && modalType === "route";
@@ -130,6 +135,8 @@ export default function RouteSheet() {
             });
           }
 
+          // 목적지 오버레이 닫기
+          setShowDestinationOverlay(false);
           closeModal();
         } else {
           console.error("경로 포인트를 추출할 수 없습니다");

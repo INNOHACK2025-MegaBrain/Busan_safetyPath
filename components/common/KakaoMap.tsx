@@ -7,6 +7,7 @@ import AddMapCustomControlStyle from "./addMapCustomControl.style";
 import { MapMarker } from "react-kakao-maps-sdk";
 import { Navigation, MapPin, X, Map as MapIcon, Satellite } from "lucide-react";
 import { useMapStore } from "@/store/mapStore";
+import { useUIStore } from "@/store/uiStore";
 import { Toggle } from "@/components/ui/toggle";
 
 export default function BasicMap() {
@@ -22,8 +23,10 @@ export default function BasicMap() {
     routePath,
     currentPosition,
     setCurrentPosition,
+    showDestinationOverlay,
+    setShowDestinationOverlay,
   } = useMapStore();
-  const [showOverlay, setShowOverlay] = useState(false);
+  const { openModal } = useUIStore();
   const [loading, setLoading] = useState(true);
 
   // 1. 경로 생성: routePath가 있을 때만 경로 표시
@@ -35,14 +38,6 @@ export default function BasicMap() {
 
     // routePath가 없으면 경로 표시 안 함
     return [];
-  }, [routePath]);
-
-  // 경로의 최종 도착 지점 - routePath가 있을 때만 사용
-  const finalDestination = useMemo(() => {
-    if (routePath && routePath.length > 0) {
-      return routePath[routePath.length - 1];
-    }
-    return null;
   }, [routePath]);
 
   useEffect(() => {
@@ -156,27 +151,17 @@ export default function BasicMap() {
             />
           )}
 
-          {/* 3. 경로 도착점 마커 - routePath가 있을 때만 표시 */}
-          {finalDestination && (
-            <MapMarker
-              position={finalDestination}
-              title="경로 도착"
-              image={{
-                src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/marker_number_icon.png",
-                size: { width: 32, height: 37 },
-                options: { offset: { x: 16, y: 34 } },
-              }}
-            />
-          )}
-
           {/* 4. 검색한 목적지 마커 */}
           {destinationInfo && (
             <>
               <MapMarker
                 position={destinationInfo.coord}
-                onClick={() => setShowOverlay(true)}
+                onClick={() => {
+                  setShowDestinationOverlay(true);
+                  openModal("route");
+                }}
               />
-              {showOverlay && (
+              {showDestinationOverlay && (
                 <CustomOverlayMap
                   position={destinationInfo.coord}
                   yAnchor={1.5}
@@ -192,7 +177,7 @@ export default function BasicMap() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          setShowOverlay(false);
+                          setShowDestinationOverlay(false);
                         }}
                         className="text-muted-foreground hover:text-foreground transition-colors"
                       >

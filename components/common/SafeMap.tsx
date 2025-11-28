@@ -7,13 +7,16 @@ import { useMapStore } from "@/store/mapStore";
 
 export default function SafeMap() {
   useKakaoLoader();
-  const { currentPosition, destinationInfo, routePath, weights } = useMapStore();
+  const { currentPosition, destinationInfo, routePath, weights } =
+    useMapStore();
 
   // 출발지와 도착지 설정
-  const startPoint = currentPosition || { lat: 37.5665, lng: 126.9780 }; // 기본값: 서울시청
+  const startPoint = currentPosition || { lat: 37.5665, lng: 126.978 }; // 기본값: 서울시청
   const endPoint = destinationInfo?.coord || { lat: 37.4979, lng: 127.0276 }; // 기본값: 강남역
 
-  const [localRoutePath, setLocalRoutePath] = useState<Array<{ lat: number; lng: number }>>([]);
+  const [localRoutePath, setLocalRoutePath] = useState<
+    Array<{ lat: number; lng: number }>
+  >([]);
 
   // routePath가 있으면 사용, 없으면 API에서 가져오기
   useEffect(() => {
@@ -56,7 +59,14 @@ export default function SafeMap() {
 
       fetchRoute();
     }
-  }, [routePath, startPoint, endPoint, currentPosition, destinationInfo, weights]);
+  }, [
+    routePath,
+    startPoint,
+    endPoint,
+    currentPosition,
+    destinationInfo,
+    weights,
+  ]);
 
   return (
     <Map
@@ -81,4 +91,3 @@ export default function SafeMap() {
     </Map>
   );
 }
-
