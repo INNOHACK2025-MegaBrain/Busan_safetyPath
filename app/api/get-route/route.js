@@ -26,7 +26,7 @@ export async function POST(request) {
     const distance = calculateDistance(start.lat, start.lng, end.lat, end.lng);
 
     // 최대 거리 제한 (예: 100km)
-    const MAX_DISTANCE = 100;
+    const MAX_DISTANCE = 50;
     if (distance > MAX_DISTANCE) {
       console.log(
         `거리가 ${distance.toFixed(
@@ -52,11 +52,11 @@ export async function POST(request) {
     // 도보는 10km 이하의 짧은 거리만 사용
     // 10km 초과면 자동차 프로필 사용 (안심길 우선은 가중치로 처리)
     let profile = "foot";
-    if (distance > 50) {
+    // MAX_DISTANCE가 50km이므로, 50km 초과는 이미 위에서 차단됨
+    // 하지만 프로필 선택 로직은 유지 (향후 MAX_DISTANCE 변경 대비)
+    if (distance > 10) {
       profile = "car";
-      console.log(
-        `거리가 ${distance.toFixed(2)}km로 너무 멀어 자동차 프로필 사용`
-      );
+      console.log(`거리가 ${distance.toFixed(2)}km로 자동차 프로필 사용`);
     }
 
     // 4. 도커에 떠있는 GraphHopper 서버 주소
@@ -180,18 +180,35 @@ export async function POST(request) {
         start,
         end,
         distance: distance.toFixed(2) + "km",
+        profile,
       });
+
+      // 거리가 MAX_DISTANCE에 가까운 경우 특별 메시지
+      const distanceRatio = (distance / MAX_DISTANCE) * 100;
+      let errorMessage = "경로를 찾을 수 없습니다.";
+
+      if (distanceRatio > 80) {
+        errorMessage =
+          "거리가 너무 멀어 경로를 찾을 수 없습니다. 더 가까운 목적지를 선택해주세요.";
+      } else if (data.message) {
+        // GraphHopper의 에러 메시지가 있으면 활용
+        errorMessage = `경로를 찾을 수 없습니다: ${data.message}`;
+      } else {
+        errorMessage =
+          "해당 좌표 간 경로를 찾을 수 없습니다. 지하철역의 경우 지상 출입구 좌표를 사용해주세요.";
+      }
 
       return NextResponse.json(
         {
           error: "경로를 찾을 수 없습니다",
-          message:
-            "GraphHopper가 해당 좌표 간 경로를 찾을 수 없습니다. 지하철역의 경우 지상 출입구 좌표를 사용해주세요.",
+          message: errorMessage,
           details: {
             start,
             end,
             distance: distance.toFixed(2) + "km",
+            maxDistance: MAX_DISTANCE + "km",
             profile,
+            distanceRatio: distanceRatio.toFixed(1) + "%",
           },
         },
         { status: 404 }
