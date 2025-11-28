@@ -26,6 +26,7 @@ export default function AuthModal() {
     email: "",
     password: "",
     name: "", // 회원가입용
+    phone: "", // 회원가입용
   });
 
   const isAuthOpen = isModalOpen && modalType === "auth";
@@ -53,9 +54,11 @@ export default function AuthModal() {
         const { data, error } = await supabase.auth.signUp({
           email: formData.email,
           password: formData.password,
+          phone: formData.phone || undefined,
           options: {
             data: {
               name: formData.name,
+              phone: formData.phone,
             },
           },
         });
@@ -79,6 +82,7 @@ export default function AuthModal() {
       email: "",
       password: "",
       name: "",
+      phone: "",
     });
   };
 
@@ -103,23 +107,42 @@ export default function AuthModal() {
 
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           {!isLogin && (
-            <div className="space-y-2">
-              <Label htmlFor="name">이름</Label>
-              <div className="relative">
-                <UserIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="name"
-                  type="text"
-                  placeholder="이름을 입력하세요"
-                  value={formData.name}
-                  onChange={(e) =>
-                    setFormData({ ...formData, name: e.target.value })
-                  }
-                  required={!isLogin}
-                  className="pl-10"
-                />
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="name">이름</Label>
+                <div className="relative">
+                  <UserIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="name"
+                    type="text"
+                    placeholder="이름을 입력하세요"
+                    value={formData.name}
+                    onChange={(e) =>
+                      setFormData({ ...formData, name: e.target.value })
+                    }
+                    required={!isLogin}
+                    className="pl-10"
+                  />
+                </div>
               </div>
-            </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="phone">전화번호</Label>
+                <div className="relative">
+                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="phone"
+                    type="tel"
+                    placeholder="010-1234-5678"
+                    value={formData.phone}
+                    onChange={(e) =>
+                      setFormData({ ...formData, phone: e.target.value })
+                    }
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+            </>
           )}
 
           <div className="space-y-2">

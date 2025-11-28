@@ -6,13 +6,21 @@ import {
   ArrowLeft,
   Phone,
   FileText,
-  LogOut,
+  Trash2,
   ChevronRight,
   User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useUserStore } from "@/store/userStore";
 import { toast } from "sonner";
 
@@ -53,6 +61,8 @@ export default function MyPagePage() {
     useState<EmergencyContact[]>(FALLBACK_CONTACTS);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchMyPageData = useCallback(async () => {
     setIsLoading(true);
@@ -111,14 +121,43 @@ export default function MyPagePage() {
   const handleEmergencySettings = () =>
     router.push("/myPage/emergency-contacts");
   const handleReportHistory = () => router.push("/myPage/reports");
-  const handleLogout = async () => {
+
+  const handleDeleteAccount = async () => {
+    if (!user) {
+      toast.error("로그인이 필요합니다.");
+      return;
+    }
+
+    setIsDeleting(true);
     try {
+      const response = await fetch("/api/delete-account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "계정 삭제에 실패했습니다.");
+      }
+
+      // 계정 삭제 성공 후 로그아웃 처리
       await signOut();
-      toast.success("로그아웃되었습니다");
+      toast.success("계정이 삭제되었습니다.");
+      setIsDeleteDialogOpen(false);
       router.push("/");
-    } catch (error) {
-      console.error("로그아웃 실패:", error);
-      toast.error("로그아웃 중 오류가 발생했습니다");
+    } catch (err) {
+      console.error("계정 삭제 실패:", err);
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "계정 삭제 중 오류가 발생했습니다.";
+      toast.error(errorMessage);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -272,13 +311,41 @@ export default function MyPagePage() {
         <Button
           variant="outline"
           className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 bg-transparent"
-          onClick={handleLogout}
-          disabled={isLoading}
+          onClick={() => setIsDeleteDialogOpen(true)}
+          disabled={isLoading || isDeleting}
         >
-          <LogOut className="h-4 w-4 mr-2" />
-          로그아웃
+          <Trash2 className="h-4 w-4 mr-2" />
+          계정 삭제
         </Button>
       </div>
+
+      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>계정 삭제 확인</DialogTitle>
+            <DialogDescription>
+              정말로 계정을 삭제하시겠습니까? 이 작업은 되돌릴 수 없으며, 모든
+              데이터가 영구적으로 삭제됩니다.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteDialogOpen(false)}
+              disabled={isDeleting}
+            >
+              취소
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteAccount}
+              disabled={isDeleting}
+            >
+              {isDeleting ? "삭제 중..." : "계정 삭제"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
