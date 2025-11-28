@@ -747,7 +747,7 @@ export default function BasicMap() {
                       currentPosition.lng
                     );
                     mapInstance.panTo(moveLatLon);
-                    mapInstance.setLevel(3);
+                    mapInstance.setLevel(8);
                   }
                 } else {
                   // 토글 해제 시 클러스터 인스턴스를 삭제(리셋)하기 위해 모드 변경
