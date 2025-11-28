@@ -137,8 +137,14 @@ export default function BasicMap() {
   );
 
   useEffect(() => {
+    if (!followTargetId) {
+      return;
+    }
+    if (!primaryIncomingTarget || primaryIncomingTarget.id !== followTargetId) {
+      return;
+    }
     centerOnTarget(primaryIncomingTarget);
-  }, [centerOnTarget, primaryIncomingTarget]);
+  }, [centerOnTarget, followTargetId, primaryIncomingTarget]);
 
   const handleFollowTarget = useCallback(
     (target?: (typeof sosTargets)[number] | null) => {
@@ -148,6 +154,10 @@ export default function BasicMap() {
     },
     [centerOnTarget]
   );
+
+  const handleUserMapInteraction = useCallback(() => {
+    setFollowTargetId((prev) => (prev ? null : prev));
+  }, []);
 
   const getDisplayName = useCallback(
     (target?: (typeof sosTargets)[number] | null) => {
@@ -466,6 +476,21 @@ export default function BasicMap() {
     loading,
     mapInstance,
   ]);
+
+  useEffect(() => {
+    const map = mapInstance || mapRef.current;
+    if (!map) {
+      return;
+    }
+
+    const cancelFollowOnDrag = () => handleUserMapInteraction();
+
+    kakao.maps.event.addListener(map, "dragstart", cancelFollowOnDrag);
+
+    return () => {
+      kakao.maps.event.removeListener(map, "dragstart", cancelFollowOnDrag);
+    };
+  }, [mapInstance, handleUserMapInteraction]);
 
   useEffect(() => {
     let isMounted = true;
