@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { Circle, useMap } from "react-kakao-maps-sdk";
 
 interface HeatmapLayerProps {
-  data: { latitude: number; longitude: number }[];
+  data: { latitude: number; longitude: number }[]; // 보안등 데이터
+  safeReturnPaths?: Array<{
+    start_latitude: number;
+    start_longitude: number;
+    end_latitude: number;
+    end_longitude: number;
+  }>; // 안심 귀갓길 데이터 (옵션)
 }
 
 interface GridCell {
@@ -14,12 +20,21 @@ interface GridCell {
   key: string;
 }
 
-export default function HeatmapLayer({ data }: HeatmapLayerProps) {
+export default function HeatmapLayer({
+  data,
+  safeReturnPaths,
+}: HeatmapLayerProps) {
   const map = useMap(); // 부모 Map 컴포넌트의 인스턴스를 가져옵니다.
   const [gridCells, setGridCells] = useState<GridCell[]>([]);
 
   useEffect(() => {
-    if (!map || !data || data.length === 0) return;
+    // 데이터가 없으면 렌더링 안 함 (둘 다 없을 때)
+    if (
+      !map ||
+      ((!data || data.length === 0) &&
+        (!safeReturnPaths || safeReturnPaths.length === 0))
+    )
+      return;
 
     const calculateGrid = () => {
       const bounds = map.getBounds();
@@ -39,6 +54,21 @@ export default function HeatmapLayer({ data }: HeatmapLayerProps) {
       const cells = [];
       let maxCount = 0;
 
+      // 안심 귀갓길 포인트 추출 (시작점과 끝점을 모두 포인트로 사용)
+      const safePathPoints: { latitude: number; longitude: number }[] = [];
+      if (safeReturnPaths) {
+        safeReturnPaths.forEach((path) => {
+          safePathPoints.push({
+            latitude: path.start_latitude,
+            longitude: path.start_longitude,
+          });
+          safePathPoints.push({
+            latitude: path.end_latitude,
+            longitude: path.end_longitude,
+          });
+        });
+      }
+
       // 2. 각 격자(Cell)별 데이터 카운팅
       for (let i = 0; i < gridSize; i++) {
         for (let j = 0; j < gridSize; j++) {
@@ -52,13 +82,27 @@ export default function HeatmapLayer({ data }: HeatmapLayerProps) {
           const centerLng = cellSwLng + lngStep / 2;
 
           // 현재 격자에 포함되는 보안등 필터링
-          const count = data.filter(
+          const lightCount = data
+            ? data.filter(
+                (point) =>
+                  point.latitude >= cellSwLat &&
+                  point.latitude < cellNeLat &&
+                  point.longitude >= cellSwLng &&
+                  point.longitude < cellNeLng
+              ).length
+            : 0;
+
+          // 현재 격자에 포함되는 안심 귀갓길 포인트 필터링
+          const safePathCount = safePathPoints.filter(
             (point) =>
               point.latitude >= cellSwLat &&
               point.latitude < cellNeLat &&
               point.longitude >= cellSwLng &&
               point.longitude < cellNeLng
           ).length;
+
+          // 안심 귀갓길은 가중치를 10배로 적용
+          const count = lightCount + safePathCount * 10;
 
           if (count > 0) {
             if (count > maxCount) maxCount = count;
@@ -111,7 +155,7 @@ export default function HeatmapLayer({ data }: HeatmapLayerProps) {
     return () => {
       kakao.maps.event.removeListener(map, "idle", handleIdle);
     };
-  }, [map, data]);
+  }, [map, data, safeReturnPaths]);
 
   return (
     <>

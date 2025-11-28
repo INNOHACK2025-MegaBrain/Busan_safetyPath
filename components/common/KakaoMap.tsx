@@ -13,7 +13,6 @@ import {
   Satellite,
   Layers,
   Grid3x3,
-  MapPinned,
 } from "lucide-react";
 import { useMapStore } from "@/store/mapStore";
 import { useUIStore } from "@/store/uiStore";
@@ -26,7 +25,7 @@ export default function BasicMap() {
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
   const [mapInstance, setMapInstance] = useState<kakao.maps.Map | null>(null);
   const [visualizationMode, setVisualizationMode] = useState<
-    "none" | "markers" | "cluster" | "heatmap"
+    "none" | "cluster" | "heatmap"
   >("none"); // 기본값은 none 유지
 
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
@@ -41,6 +40,8 @@ export default function BasicMap() {
     setShowDestinationOverlay,
     securityLights,
     setSecurityLights,
+    safeReturnPaths,
+    setSafeReturnPaths,
   } = useMapStore();
   const { openModal } = useUIStore();
   const [loading, setLoading] = useState(true);
@@ -48,6 +49,7 @@ export default function BasicMap() {
 
   // 이전 요청 취소를 위한 AbortController (컴포넌트 최상위로 이동)
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pathAbortControllerRef = useRef<AbortController | null>(null); // 여성 안심 귀갓길용
   // 마지막 조회 영역 저장 (중복 요청 방지)
   const lastBoundsRef = useRef<{
     swLat: number;
@@ -113,12 +115,12 @@ export default function BasicMap() {
 
   // mapStore의 center가 변경될 때 지도 이동
   useEffect(() => {
-    const map = mapRef.current;
+    const map = mapInstance || mapRef.current;
     if (!map) return;
 
     const moveLatLon = new kakao.maps.LatLng(center.lat, center.lng);
     map.setCenter(moveLatLon);
-  }, [center]);
+  }, [center, mapInstance]); // mapInstance 의존성 추가
 
   // 지도 영역 변경 시 보안등 데이터 가져오기
   useEffect(() => {
@@ -181,7 +183,15 @@ export default function BasicMap() {
               );
               if (debugResponse.ok) {
                 const debugData = await debugResponse.json();
-                console.log("[지도] DB 전체 데이터 확인:", debugData);
+                console.log("[지도] 보안등 데이터 확인:", debugData);
+              }
+
+              const debugPathResponse = await fetch(
+                `/api/safe-return-paths?debug=true`
+              );
+              if (debugPathResponse.ok) {
+                const debugPathData = await debugPathResponse.json();
+                console.log("[지도] 안심 귀갓길 데이터 확인:", debugPathData);
               }
             } catch (debugError) {
               console.error("[지도] 디버그 API 호출 실패:", debugError);
@@ -192,6 +202,18 @@ export default function BasicMap() {
         const response = await fetch(
           `/api/security-lights?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
           { signal: abortController.signal }
+        );
+
+        // 여성 안심 귀갓길 데이터 가져오기
+        if (pathAbortControllerRef.current) {
+          pathAbortControllerRef.current.abort();
+        }
+        const pathAbortController = new AbortController();
+        pathAbortControllerRef.current = pathAbortController;
+
+        const pathResponse = await fetch(
+          `/api/safe-return-paths?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: pathAbortController.signal }
         );
 
         // 요청이 취소되었으면 처리하지 않음
@@ -219,12 +241,17 @@ export default function BasicMap() {
             setSecurityLights([]);
           }
         }
+
+        if (pathResponse.ok) {
+          const pathData = await pathResponse.json();
+          setSafeReturnPaths(pathData.paths || []);
+        }
       } catch (error) {
         // AbortError는 무시 (의도적인 취소)
         if (error instanceof Error && error.name === "AbortError") {
           return;
         }
-        console.error("[지도] 보안등 데이터 가져오기 실패:", error);
+        console.error("[지도] 데이터 가져오기 실패:", error);
       }
     };
 
@@ -263,47 +290,72 @@ export default function BasicMap() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      if (pathAbortControllerRef.current) {
+        pathAbortControllerRef.current.abort();
+      }
       kakao.maps.event.removeListener(map, "tilesloaded", handleLoad);
       kakao.maps.event.removeListener(map, "idle", handleIdle);
     };
-  }, [setSecurityLights, loading, mapInstance]);
+  }, [setSecurityLights, setSafeReturnPaths, loading, mapInstance]);
 
   // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
   const renderMarkers = () => {
-    if (!securityLights || securityLights.length === 0) return null;
+    const markers = [];
 
-    return securityLights
-      .filter((light) => {
-        // 좌표 유효성 검사
-        return (
-          light.latitude &&
-          light.longitude &&
-          typeof light.latitude === "number" &&
-          typeof light.longitude === "number" &&
-          !isNaN(light.latitude) &&
-          !isNaN(light.longitude)
-        );
-      })
-      .map((light) => {
-        const title =
-          light.address_lot ||
-          `${light.si_do || ""} ${light.si_gun_gu || ""} ${
-            light.eup_myeon_dong || ""
-          }`.trim() ||
-          "보안등";
+    // 보안등 마커
+    if (securityLights && securityLights.length > 0) {
+      const lightMarkers = securityLights
+        .filter((light) => {
+          // 좌표 유효성 검사
+          return (
+            light.latitude &&
+            light.longitude &&
+            typeof light.latitude === "number" &&
+            typeof light.longitude === "number" &&
+            !isNaN(light.latitude) &&
+            !isNaN(light.longitude)
+          );
+        })
+        .map((light) => {
+          const title =
+            light.address_lot ||
+            `${light.si_do || ""} ${light.si_gun_gu || ""} ${
+              light.eup_myeon_dong || ""
+            }`.trim() ||
+            "보안등";
 
-        return (
-          <MapMarker
-            key={light.id}
-            position={{ lat: light.latitude, lng: light.longitude }}
-            title={title}
-            image={{
-              src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
-              size: { width: 24, height: 35 },
-            }}
-          />
-        );
-      });
+          return (
+            <MapMarker
+              key={`light-${light.id}`}
+              position={{ lat: light.latitude, lng: light.longitude }}
+              title={title}
+              image={{
+                src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
+                size: { width: 24, height: 35 },
+              }}
+            />
+          );
+        });
+      markers.push(...lightMarkers);
+    }
+
+    // 안심 귀갓길 마커 (파란색)
+    if (safeReturnPaths && safeReturnPaths.length > 0) {
+      const pathMarkers = safeReturnPaths.map((path) => (
+        <MapMarker
+          key={`path-${path.id}`}
+          position={{ lat: path.start_latitude, lng: path.start_longitude }}
+          title={`안심 귀갓길: ${path.start_address} ~ ${path.end_address}`}
+          image={{
+            src: "https://t1.daumcdn.net/mapjsapi/images/marker.png",
+            size: { width: 29, height: 42 },
+          }}
+        />
+      ));
+      markers.push(...pathMarkers);
+    }
+
+    return markers;
   };
 
   if (loading) {
@@ -372,63 +424,75 @@ export default function BasicMap() {
 
           {/* none 모드일 때는 아무것도 렌더링하지 않음 */}
 
-          {/* 클러스터 모드 */}
-          {visualizationMode === "cluster" && (
-            <MarkerClusterer
-              averageCenter={true}
-              minLevel={6}
-              // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수 (기본값 사용해도 됨)
-              // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
-              styles={[
-                {
-                  // 1단계 (개수가 적을 때)
-                  width: "30px",
-                  height: "30px",
-                  background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "30px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(59, 130, 246, 1)",
-                },
-                {
-                  // 2단계 (개수가 중간일 때)
-                  width: "40px",
-                  height: "40px",
-                  background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "40px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(245, 158, 11, 1)",
-                },
-                {
-                  // 3단계 (개수가 많을 때)
-                  width: "50px",
-                  height: "50px",
-                  background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "50px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(239, 68, 68, 1)",
-                },
-              ]}
-            >
-              {renderMarkers()}
-            </MarkerClusterer>
-          )}
-
-          {/* 마커 모드 */}
-          {visualizationMode === "markers" && renderMarkers()}
+          {/* 클러스터 모드 (마커 모드 통합) */}
+          {visualizationMode === "cluster" &&
+            (securityLights.length > 0 || safeReturnPaths.length > 0) && (
+              <MarkerClusterer
+                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
+                averageCenter={true}
+                minLevel={1} // 줌 레벨 제한 해제 (모든 레벨에서 클러스터링 동작하되, 확대 시 마커가 보임)
+                // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수
+                calculator={(size) => {
+                  // 안심 귀갓길이 포함되면 가중치를 더 줄 수도 있지만,
+                  // 여기서는 단순 개수로 처리하거나 필요 시 로직 수정 가능
+                  // 기본 로직: 10개 미만 -> [0], 10~30 -> [1], 30~50 -> [2], 50 이상 -> [3]
+                  // 여기서는 styles 배열 길이에 맞춰 [0], [1], [2] 리턴
+                  if (size < 10) return [0];
+                  if (size < 50) return [1];
+                  return [2];
+                }}
+                // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
+                styles={[
+                  {
+                    // 1단계 (개수가 적을 때)
+                    width: "30px",
+                    height: "30px",
+                    background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "30px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(59, 130, 246, 1)",
+                  },
+                  {
+                    // 2단계 (개수가 중간일 때)
+                    width: "40px",
+                    height: "40px",
+                    background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "40px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(245, 158, 11, 1)",
+                  },
+                  {
+                    // 3단계 (개수가 많을 때)
+                    width: "50px",
+                    height: "50px",
+                    background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "50px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(239, 68, 68, 1)",
+                  },
+                ]}
+              >
+                {renderMarkers()}
+              </MarkerClusterer>
+            )}
 
           {/* 히트맵 모드 */}
-          {visualizationMode === "heatmap" && securityLights.length > 0 && (
-            <HeatmapLayer data={securityLights} />
-          )}
+          {visualizationMode === "heatmap" &&
+            (securityLights.length > 0 || safeReturnPaths.length > 0) && (
+              <HeatmapLayer
+                data={securityLights}
+                safeReturnPaths={safeReturnPaths}
+              />
+            )}
 
           {/* 4. 검색한 목적지 마커 */}
           {destinationInfo && (
@@ -487,7 +551,17 @@ export default function BasicMap() {
             <Toggle
               pressed={visualizationMode === "none"}
               onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("none");
+                if (pressed) {
+                  setVisualizationMode("none");
+                  if (mapInstance && currentPosition) {
+                    const moveLatLon = new kakao.maps.LatLng(
+                      currentPosition.lat,
+                      currentPosition.lng
+                    );
+                    mapInstance.panTo(moveLatLon);
+                    mapInstance.setLevel(3); // 지도만 볼 때는 더 자세히 (3레벨)
+                  }
+                }
               }}
               variant="outline"
               size="sm"
@@ -498,22 +572,22 @@ export default function BasicMap() {
               <span className="text-xs">지도만</span>
             </Toggle>
             <Toggle
-              pressed={visualizationMode === "markers"}
-              onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("markers");
-              }}
-              variant="outline"
-              size="sm"
-              className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground w-full justify-start"
-              aria-label="마커 모드"
-            >
-              <MapPinned className="h-3 w-3 mr-1" />
-              <span className="text-xs">마커</span>
-            </Toggle>
-            <Toggle
               pressed={visualizationMode === "cluster"}
               onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("cluster");
+                if (pressed) {
+                  setVisualizationMode("cluster");
+                  if (mapInstance && currentPosition) {
+                    const moveLatLon = new kakao.maps.LatLng(
+                      currentPosition.lat,
+                      currentPosition.lng
+                    );
+                    mapInstance.panTo(moveLatLon);
+                    mapInstance.setLevel(6);
+                  }
+                } else {
+                  // 토글 해제 시 클러스터 인스턴스를 삭제(리셋)하기 위해 모드 변경
+                  setVisualizationMode("none");
+                }
               }}
               variant="outline"
               size="sm"
@@ -526,7 +600,19 @@ export default function BasicMap() {
             <Toggle
               pressed={visualizationMode === "heatmap"}
               onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("heatmap");
+                if (pressed) {
+                  setVisualizationMode("heatmap");
+                  if (mapInstance && currentPosition) {
+                    const moveLatLon = new kakao.maps.LatLng(
+                      currentPosition.lat,
+                      currentPosition.lng
+                    );
+                    mapInstance.panTo(moveLatLon);
+                    mapInstance.setLevel(3); // 히트맵도 자세히 보기 위해 레벨 3으로 변경
+                  }
+                } else {
+                  setVisualizationMode("none");
+                }
               }}
               variant="outline"
               size="sm"

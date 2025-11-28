@@ -12,6 +12,7 @@ export default function FloatingReportButton() {
     <div className="fixed bottom-6 left-6 z-50">
       <button
         onClick={handleReport}
+        onContextMenu={(e) => e.preventDefault()} // 우클릭 방지
         className="relative h-14 w-14 rounded-full bg-destructive hover:bg-destructive/90 border-2 border-destructive shadow-lg hover:scale-110 hover:shadow-2xl transition-all duration-300 flex items-center justify-center group ring-2 ring-destructive/20 hover:ring-destructive/40"
         aria-label="신고"
       >

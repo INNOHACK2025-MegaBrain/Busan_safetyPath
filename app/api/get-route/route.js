@@ -247,7 +247,8 @@ export async function POST(request) {
       try {
         const supabase = createClient(
           process.env.NEXT_PUBLIC_SUPABASE_URL,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+          process.env.SUPABASE_SERVICE_ROLE_KEY ||
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
         );
 
         // 전체 경로들을 포함하는 Bounding Box 계산
@@ -272,7 +273,8 @@ export async function POST(request) {
           // DB에서 해당 영역 내 보안등 조회 (약간의 버퍼 추가)
           const buffer = 0.003; // 약 300m
 
-          const { data: lights, error } = await supabase
+          // 1. 보안등 데이터 조회
+          const { data: lights, error: lightsError } = await supabase
             .from("security_lights")
             .select("latitude, longitude")
             .gte("latitude", minLat - buffer)
@@ -280,36 +282,101 @@ export async function POST(request) {
             .gte("longitude", minLng - buffer)
             .lte("longitude", maxLng + buffer);
 
-          if (!error && lights && lights.length > 0) {
-            console.log(`[Route] 조회된 보안등 개수: ${lights.length}`);
+          // 2. 안심 귀갓길 데이터 조회
+          const { data: safePaths, error: safePathsError } = await supabase
+            .from("women_safe_return_paths")
+            .select(
+              "start_latitude, start_longitude, end_latitude, end_longitude"
+            )
+            .or(
+              `and(start_latitude.gte.${minLat - buffer},start_latitude.lte.${
+                maxLat + buffer
+              },start_longitude.gte.${minLng - buffer},start_longitude.lte.${
+                maxLng + buffer
+              }),and(end_latitude.gte.${minLat - buffer},end_latitude.lte.${
+                maxLat + buffer
+              },end_longitude.gte.${minLng - buffer},end_longitude.lte.${
+                maxLng + buffer
+              })`
+            );
 
-            // 각 경로별 보안등 점수 계산
+          if (lightsError) console.error("보안등 조회 에러:", lightsError);
+          if (safePathsError)
+            console.error("안심 귀갓길 조회 에러:", safePathsError);
+
+          const hasLights = !lightsError && lights && lights.length > 0;
+          const hasSafePaths =
+            !safePathsError && safePaths && safePaths.length > 0;
+
+          if (hasLights || hasSafePaths) {
+            console.log(
+              `[Route] 조회된 보안등 개수: ${
+                lights?.length || 0
+              }, 안심 귀갓길 개수: ${safePaths?.length || 0}`
+            );
+
+            // 각 경로별 점수 계산
             data.paths.forEach((path) => {
               const points = path.points.coordinates; // [lon, lat] 배열
-              const pathLights = new Set(); // 중복 카운트 방지 (좌표 문자열 사용)
+              const pathLights = new Set(); // 중복 카운트 방지
+              const pathSafePaths = new Set(); // 중복 카운트 방지
 
-              // 경로 포인트 샘플링하여 주변 보안등 확인
-              // 모든 점을 확인하면 느릴 수 있으므로 5개씩 건너뛰며 확인 (약 10~20m 간격 될 듯)
+              // 경로 포인트 샘플링하여 주변 요소 확인
               for (let i = 0; i < points.length; i += 5) {
                 const [pLng, pLat] = points[i];
 
-                // 보안등 데이터 순회 (지역 필터링된 데이터라 크지 않음)
-                for (const light of lights) {
-                  // 간단한 거리 계산 (제곱 거리 비교가 더 빠름)
-                  const dLat = light.latitude - pLat;
-                  const dLng = light.longitude - pLng;
-                  // 0.0005도 ≈ 50m (범위 완화: 0.0003 -> 0.0005)
-                  if (dLat * dLat + dLng * dLng < 0.0005 * 0.0005) {
-                    pathLights.add(`${light.latitude},${light.longitude}`);
+                // 1. 보안등 확인
+                if (hasLights) {
+                  for (const light of lights) {
+                    const dLat = light.latitude - pLat;
+                    const dLng = light.longitude - pLng;
+                    // 0.0005도 ≈ 50m
+                    if (dLat * dLat + dLng * dLng < 0.0005 * 0.0005) {
+                      pathLights.add(`${light.latitude},${light.longitude}`);
+                    }
+                  }
+                }
+
+                // 2. 안심 귀갓길 확인
+                if (hasSafePaths) {
+                  for (const safePath of safePaths) {
+                    // 시작점과 끝점 모두 확인 (안심 귀갓길의 양 끝점 주변인지)
+                    // 더 정교하게 하려면 라인과 라인의 거리를 계산해야 하지만,
+                    // 일단은 주요 포인트(시작/끝) 근처를 지나는지로 판단
+
+                    const dStartLat = safePath.start_latitude - pLat;
+                    const dStartLng = safePath.start_longitude - pLng;
+                    const dEndLat = safePath.end_latitude - pLat;
+                    const dEndLng = safePath.end_longitude - pLng;
+
+                    // 0.001도 ≈ 100m (안심 귀갓길은 좀 더 넓게 인정)
+                    const threshold = 0.001 * 0.001;
+
+                    if (
+                      dStartLat * dStartLat + dStartLng * dStartLng <
+                        threshold ||
+                      dEndLat * dEndLat + dEndLng * dEndLng < threshold
+                    ) {
+                      // 고유 식별자로 좌표 조합 사용
+                      pathSafePaths.add(
+                        `${safePath.start_latitude},${safePath.start_longitude}`
+                      );
+                    }
                   }
                 }
               }
 
-              // 점수 할당 (보안등 개수)
-              path.securityScore = pathLights.size;
+              // 점수 할당
+              // 보안등 1개당 1점
+              // 안심 귀갓길 1개당 10점 (가중치를 높게 부여)
+              path.securityScore =
+                pathLights.size * 1 + pathSafePaths.size * 10;
 
-              // 디버깅용 로그
-              // console.log(`Path score: ${path.securityScore}, distance: ${path.distance}`);
+              // 디버깅용 정보 추가
+              path.debugInfo = {
+                lightsCount: pathLights.size,
+                safePathsCount: pathSafePaths.size,
+              };
             });
 
             // 보안등 점수가 높은 순으로 정렬
@@ -318,15 +385,18 @@ export async function POST(request) {
             );
 
             console.log(
-              "[Route] 경로별 보안등 점수(정렬후):",
-              data.paths.map((p) => p.securityScore)
+              "[Route] 경로별 보안 점수(정렬후):",
+              data.paths.map((p) => ({
+                score: p.securityScore,
+                details: p.debugInfo,
+              }))
             );
           } else {
-            console.log("[Route] 조회된 보안등이 없거나 에러 발생:", error);
+            console.log("[Route] 조회된 보안 요소가 없음");
           }
         }
       } catch (err) {
-        console.error("보안등 점수 계산 중 오류:", err);
+        console.error("보안 점수 계산 중 오류:", err);
       }
     }
 

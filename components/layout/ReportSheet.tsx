@@ -152,6 +152,7 @@ export default function ReportSheet() {
                 onMouseUp={handleMouseUp}
                 onTouchStart={handleMouseDown}
                 onTouchEnd={handleMouseUp}
+                onContextMenu={(e) => e.preventDefault()} // 우클릭 방지
                 className={`
                   h-32 w-32 rounded-full bg-destructive hover:bg-destructive/90 
                   border-4 border-destructive shadow-2xl 
