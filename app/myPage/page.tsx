@@ -112,14 +112,6 @@ export default function MyPagePage() {
         <h1 className="text-lg font-semibold ml-2 text-foreground">
           마이페이지
         </h1>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="ml-auto"
-          onClick={() => router.push("/settings")}
-        >
-          <Settings className="h-5 w-5" />
-        </Button>
       </header>
 
       <div className="flex-1 p-4 space-y-4">
