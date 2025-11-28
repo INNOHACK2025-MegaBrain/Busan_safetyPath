@@ -273,51 +273,59 @@ export async function POST(request) {
         if (hasBbox) {
           // DB에서 해당 영역 내 보안 요소 조회 (약간의 버퍼 추가)
           const buffer = 0.003; // 약 300m
+          const searchMinLat = minLat - buffer;
+          const searchMaxLat = maxLat + buffer;
+          const searchMinLng = minLng - buffer;
+          const searchMaxLng = maxLng + buffer;
 
-          // 1. 보안등 데이터 조회 (가중치 최하)
-          const { data: lights, error: lightsError } = await supabase
-            .from("security_lights")
-            .select("latitude, longitude")
-            .gte("latitude", minLat - buffer)
-            .lte("latitude", maxLat + buffer)
-            .gte("longitude", minLng - buffer)
-            .lte("longitude", maxLng + buffer);
+          // 1. 보안등 데이터 조회 (RPC 사용)
+          const { data: lights, error: lightsError } = await supabase.rpc(
+            "get_security_lights_in_bbox",
+            {
+              min_lat: searchMinLat,
+              min_lng: searchMinLng,
+              max_lat: searchMaxLat,
+              max_lng: searchMaxLng,
+            }
+          );
 
-          // 2. 안심 귀갓길 데이터 조회 (가중치 2순위)
-          const { data: safePaths, error: safePathsError } = await supabase
-            .from("women_safe_return_paths")
-            .select(
-              "start_latitude, start_longitude, end_latitude, end_longitude"
-            )
-            .or(
-              `and(start_latitude.gte.${minLat - buffer},start_latitude.lte.${
-                maxLat + buffer
-              },start_longitude.gte.${minLng - buffer},start_longitude.lte.${
-                maxLng + buffer
-              }),and(end_latitude.gte.${minLat - buffer},end_latitude.lte.${
-                maxLat + buffer
-              },end_longitude.gte.${minLng - buffer},end_longitude.lte.${
-                maxLng + buffer
-              })`
-            );
+          // 2. 안심 귀갓길 데이터 조회 (RPC 사용)
+          // FIXME: get_safe_return_paths_in_bbox로 이름이 같을 수 있으니 확인 필요
+          // API route 파일명은 safe-return-paths/route.ts (women_safe_return_paths 테이블)
+          // RPC 함수명은 get_safe_return_paths_in_bbox (women_safe_return_paths 테이블)
+          const { data: safePaths, error: safePathsError } = await supabase.rpc(
+            "get_safe_return_paths_in_bbox",
+            {
+              min_lat: searchMinLat,
+              min_lng: searchMinLng,
+              max_lat: searchMaxLat,
+              max_lng: searchMaxLng,
+            }
+          );
 
-          // 3. 비상벨 데이터 조회 (가중치 3순위) - safe_return_paths 테이블 사용
-          const { data: bells, error: bellsError } = await supabase
-            .from("safe_return_paths")
-            .select("latitude, longitude")
-            .gte("latitude", minLat - buffer)
-            .lte("latitude", maxLat + buffer)
-            .gte("longitude", minLng - buffer)
-            .lte("longitude", maxLng + buffer);
+          // 3. 비상벨 데이터 조회 (RPC 사용)
+          // API route 파일명은 emergency-bells/route.ts (safe_return_paths 테이블)
+          // RPC 함수명은 get_emergency_bells_in_bbox (safe_return_paths 테이블)
+          const { data: bells, error: bellsError } = await supabase.rpc(
+            "get_emergency_bells_in_bbox",
+            {
+              min_lat: searchMinLat,
+              min_lng: searchMinLng,
+              max_lat: searchMaxLat,
+              max_lng: searchMaxLng,
+            }
+          );
 
-          // 4. CCTV 데이터 조회 (가중치 1순위 - 가장 높음)
-          const { data: cctvs, error: cctvsError } = await supabase
-            .from("cctv_installations")
-            .select("latitude, longitude")
-            .gte("latitude", minLat - buffer)
-            .lte("latitude", maxLat + buffer)
-            .gte("longitude", minLng - buffer)
-            .lte("longitude", maxLng + buffer);
+          // 4. CCTV 데이터 조회 (RPC 사용)
+          const { data: cctvs, error: cctvsError } = await supabase.rpc(
+            "get_cctvs_in_bbox",
+            {
+              min_lat: searchMinLat,
+              min_lng: searchMinLng,
+              max_lat: searchMaxLat,
+              max_lng: searchMaxLng,
+            }
+          );
 
           if (lightsError) console.error("보안등 조회 에러:", lightsError);
           if (safePathsError)
@@ -386,6 +394,9 @@ export async function POST(request) {
                 // 1. 보안등 확인
                 if (hasLights) {
                   for (const light of lights) {
+                    // 여기서는 distance calculation을 다시 해야함.
+                    // PostGIS를 써서 서버에서 필터링해왔지만, 경로 포인트별 근접성은 여전히 계산해야 함.
+                    // 다만, 전체 데이터가 아니라 bbox 내 데이터만 가져왔으므로 루프 횟수는 줄어듦.
                     const dLat = light.latitude - pLat;
                     const dLng = light.longitude - pLng;
                     if (dLat * dLat + dLng * dLng < 0.0005 * 0.0005) {

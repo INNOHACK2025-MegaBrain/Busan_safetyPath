@@ -87,100 +87,36 @@ export async function GET(request: NextRequest) {
       },
     });
 
-    // 테스트: 부산 지역 샘플 데이터 좌표 범위 확인
-    // 샘플 데이터: lat: 35.073, lng: 128.839
-    const sampleLat = 35.07328616;
-    const sampleLng = 128.8397788;
-    const isInRange =
-      sampleLat >= minLat &&
-      sampleLat <= maxLat &&
-      sampleLng >= minLng &&
-      sampleLng <= maxLng;
-    console.log(
-      `[API] 샘플 데이터(35.073, 128.839)가 조회 영역에 포함되는가?`,
-      isInRange
-    );
-
-    // geom 필드가 있으면 공간 쿼리 사용, 없으면 일반 쿼리 사용
-    console.log("[API] Supabase 쿼리 시작");
-    const query = supabase
-      .from("security_lights")
-      .select(
-        "id, latitude, longitude, si_do, si_gun_gu, eup_myeon_dong, address_lot"
-      )
-      .gte("latitude", minLat)
-      .lte("latitude", maxLat)
-      .gte("longitude", minLng)
-      .lte("longitude", maxLng)
-      .not("latitude", "is", null)
-      .not("longitude", "is", null)
-      .limit(1000);
-
-    console.log("[API] 쿼리 조건:", {
-      "latitude >= minLat": minLat,
-      "latitude <= maxLat": maxLat,
-      "longitude >= minLng": minLng,
-      "longitude <= maxLng": maxLng,
+    // RPC 호출 (Spatial Index 사용)
+    console.log("[API] Supabase RPC(get_security_lights_in_bbox) 호출 시작");
+    const { data, error } = await supabase.rpc("get_security_lights_in_bbox", {
+      min_lat: minLat,
+      min_lng: minLng,
+      max_lat: maxLat,
+      max_lng: maxLng,
     });
 
-    const { data, error } = await query;
-
-    console.log("[API] Supabase 쿼리 완료");
+    console.log("[API] Supabase RPC 완료");
     if (error) {
-      console.error("[API] 보안등 조회 오류:", error);
+      console.error("[API] 보안등 조회 오류 (RPC):", error);
       console.error("[API] 에러 상세:", {
         code: error.code,
         message: error.message,
         details: error.details,
         hint: error.hint,
       });
+      // RPC가 없거나 실패할 경우 기존 방식(Lat/Lng 범위 검색)으로 폴백할 수도 있지만,
+      // 여기서는 Spatial Index 사용을 위해 에러를 반환하고 마이그레이션 실행을 유도함.
       return NextResponse.json(
-        { error: "보안등 정보를 불러오는데 실패했습니다.", details: error },
+        {
+          error: "보안등 정보를 불러오는데 실패했습니다. (공간 인덱스 필요)",
+          details: error,
+        },
         { status: 500 }
       );
     }
 
     console.log(`[API] 조회 결과: ${data?.length || 0}개`);
-    if (data && data.length > 0) {
-      console.log(`[API] 첫 번째 데이터 샘플:`, data[0]);
-      console.log(`[API] 데이터 좌표 범위:`, {
-        minLatInData: Math.min(...data.map((d) => d.latitude)),
-        maxLatInData: Math.max(...data.map((d) => d.latitude)),
-        minLngInData: Math.min(...data.map((d) => d.longitude)),
-        maxLngInData: Math.max(...data.map((d) => d.longitude)),
-      });
-    } else {
-      console.warn(`[API] 조회 결과가 0개입니다.`);
-      console.warn(
-        `[API] 조회 영역: lat[${minLat.toFixed(6)}, ${maxLat.toFixed(
-          6
-        )}], lng[${minLng.toFixed(6)}, ${maxLng.toFixed(6)}]`
-      );
-      console.warn(
-        `[API] 부산 지역 샘플 좌표(35.073, 128.839)가 이 범위에 포함되는지 확인하세요.`
-      );
-
-      // 범위가 너무 좁으면 테스트로 더 넓은 범위로 조회해보기
-      if (maxLat - minLat < 0.1 || maxLng - minLng < 0.1) {
-        console.log(
-          "[API] 조회 영역이 좁아서 테스트로 부산 전체 지역 조회 시도..."
-        );
-        const { data: testData, error: testError } = await supabase
-          .from("security_lights")
-          .select("id, latitude, longitude")
-          .gte("latitude", 35.0)
-          .lte("latitude", 35.3)
-          .gte("longitude", 128.8)
-          .lte("longitude", 129.3)
-          .not("latitude", "is", null)
-          .not("longitude", "is", null)
-          .limit(10);
-        console.log(
-          `[API] 부산 전체 지역 테스트 조회 결과: ${testData?.length || 0}개`,
-          testError
-        );
-      }
-    }
 
     return NextResponse.json({ securityLights: data || [] });
   } catch (error) {
