@@ -42,6 +42,9 @@ export default function BasicMap() {
     setSecurityLights,
     safeReturnPaths,
     setSafeReturnPaths,
+    emergencyBells,
+    setEmergencyBells,
+    setLevel,
   } = useMapStore();
   const { openModal } = useUIStore();
   const [loading, setLoading] = useState(true);
@@ -50,6 +53,7 @@ export default function BasicMap() {
   // 이전 요청 취소를 위한 AbortController (컴포넌트 최상위로 이동)
   const abortControllerRef = useRef<AbortController | null>(null);
   const pathAbortControllerRef = useRef<AbortController | null>(null); // 여성 안심 귀갓길용
+  const bellAbortControllerRef = useRef<AbortController | null>(null); // 비상벨용
   // 마지막 조회 영역 저장 (중복 요청 방지)
   const lastBoundsRef = useRef<{
     swLat: number;
@@ -193,6 +197,14 @@ export default function BasicMap() {
                 const debugPathData = await debugPathResponse.json();
                 console.log("[지도] 안심 귀갓길 데이터 확인:", debugPathData);
               }
+
+              const debugBellResponse = await fetch(
+                `/api/emergency-bells?debug=true`
+              );
+              if (debugBellResponse.ok) {
+                const debugBellData = await debugBellResponse.json();
+                console.log("[지도] 비상벨 데이터 확인:", debugBellData);
+              }
             } catch (debugError) {
               console.error("[지도] 디버그 API 호출 실패:", debugError);
             }
@@ -211,9 +223,21 @@ export default function BasicMap() {
         const pathAbortController = new AbortController();
         pathAbortControllerRef.current = pathAbortController;
 
+        // 비상벨 데이터 가져오기
+        if (bellAbortControllerRef.current) {
+          bellAbortControllerRef.current.abort();
+        }
+        const bellAbortController = new AbortController();
+        bellAbortControllerRef.current = bellAbortController;
+
         const pathResponse = await fetch(
           `/api/safe-return-paths?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
           { signal: pathAbortController.signal }
+        );
+
+        const bellResponse = await fetch(
+          `/api/emergency-bells?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: bellAbortController.signal }
         );
 
         // 요청이 취소되었으면 처리하지 않음
@@ -246,6 +270,11 @@ export default function BasicMap() {
           const pathData = await pathResponse.json();
           setSafeReturnPaths(pathData.paths || []);
         }
+
+        if (bellResponse.ok) {
+          const bellData = await bellResponse.json();
+          setEmergencyBells(bellData.bells || []);
+        }
       } catch (error) {
         // AbortError는 무시 (의도적인 취소)
         if (error instanceof Error && error.name === "AbortError") {
@@ -277,6 +306,9 @@ export default function BasicMap() {
       const bounds = map.getBounds();
       if (bounds) {
         fetchSecurityLights();
+        // 중복 등록 방지를 위해 기존 리스너 제거 시도 후 추가는 handleLoad에서 처리하지만
+        // 여기서는 바로 idle 리스너를 붙이는게 안전함
+        kakao.maps.event.removeListener(map, "idle", handleIdle);
         kakao.maps.event.addListener(map, "idle", handleIdle);
       } else {
         setTimeout(tryFetch, 500);
@@ -293,14 +325,31 @@ export default function BasicMap() {
       if (pathAbortControllerRef.current) {
         pathAbortControllerRef.current.abort();
       }
+      if (bellAbortControllerRef.current) {
+        bellAbortControllerRef.current.abort();
+      }
       kakao.maps.event.removeListener(map, "tilesloaded", handleLoad);
       kakao.maps.event.removeListener(map, "idle", handleIdle);
     };
-  }, [setSecurityLights, setSafeReturnPaths, loading, mapInstance]);
+  }, [
+    setSecurityLights,
+    setSafeReturnPaths,
+    setEmergencyBells,
+    loading,
+    mapInstance,
+  ]);
 
   // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
   const renderMarkers = () => {
     const markers = [];
+
+    // 아이콘 SVG Data URI (원형 배경 포함)
+    const lightIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EAB308%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15%2014c.2-1%20.7-1.7%201.5-2.5%201-1%201.5-2%201.5-3.5A6%206%200%200%200%206%208c0%201%20.5%202%201.5%203.5.8.8%201.3%201.5%201.5%202.5%22%2F%3E%3Cpath%20d%3D%22M9%2018h6%22%2F%3E%3Cpath%20d%3D%22M10%2022h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const footprintIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%233B82F6%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M4%2016v-2.38C4%2011.5%202.97%2010.5%203%208c.03-2.72%201.49-6%204.5-6C9.37%202%2011%203.8%2011%208c0%201.25-.5%202-1.25%202H4.12c.34.6.54%201.28.54%202A2.5%202.5%200%200%201%204%2016z%22%2F%3E%3Cpath%20d%3D%22M20%2020v-2.38c0-2.12%201.03-3.12%201-5.62-.03-2.72-1.49-6-4.5-6C14.63%206%2013%207.8%2013%2012c0%201.25.5%202%201.25%202h5.63c-.34.6-.54%201.28-.54%202a2.5%202.5%200%200%201%20.66%204z%22%2F%3E%3Cpath%20d%3D%22M16%2017h4%22%2F%3E%3Cpath%20d%3D%22M4%2013h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const bellIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EF4444%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208a6%206%200%200%201%2012%200c0%207%203%209%203%209H3s3-2%203-9%22%2F%3E%3Cpath%20d%3D%22M10.3%2021a1.94%201.94%200%200%200%203.4%200%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
 
     // 보안등 마커
     if (securityLights && securityLights.length > 0) {
@@ -328,10 +377,10 @@ export default function BasicMap() {
             <MapMarker
               key={`light-${light.id}`}
               position={{ lat: light.latitude, lng: light.longitude }}
-              title={title}
+              title={title || ""}
               image={{
-                src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
-                size: { width: 24, height: 35 },
+                src: lightIcon,
+                size: { width: 32, height: 32 },
               }}
             />
           );
@@ -339,20 +388,47 @@ export default function BasicMap() {
       markers.push(...lightMarkers);
     }
 
-    // 안심 귀갓길 마커 (파란색)
-    if (safeReturnPaths && safeReturnPaths.length > 0) {
+    // 안심 귀갓길 마커 (파란색) - 줌 레벨 5 이하일 때만 표시 (더 확대되었을 때)
+    // 카카오맵은 레벨이 낮을수록 확대된 상태임 (1: 가장 확대 ~ 14: 가장 축소)
+    if (
+      safeReturnPaths &&
+      safeReturnPaths.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
       const pathMarkers = safeReturnPaths.map((path) => (
         <MapMarker
           key={`path-${path.id}`}
           position={{ lat: path.start_latitude, lng: path.start_longitude }}
           title={`안심 귀갓길: ${path.start_address} ~ ${path.end_address}`}
           image={{
-            src: "https://t1.daumcdn.net/mapjsapi/images/marker.png",
-            size: { width: 29, height: 42 },
+            src: footprintIcon,
+            size: { width: 32, height: 32 },
           }}
         />
       ));
       markers.push(...pathMarkers);
+    }
+
+    // 비상벨 마커 (빨간색) - 줌 레벨 5 이하일 때만 표시
+    if (
+      emergencyBells &&
+      emergencyBells.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const bellMarkers = emergencyBells.map((bell) => (
+        <MapMarker
+          key={`bell-${bell.id}`}
+          position={{ lat: bell.latitude, lng: bell.longitude }}
+          title={`비상벨: ${bell.location || bell.category}`}
+          image={{
+            src: bellIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...bellMarkers);
     }
 
     return markers;
@@ -388,12 +464,12 @@ export default function BasicMap() {
             console.log("[지도] onCreate 콜백 호출됨, 지도 인스턴스 받음");
             setMapInstance(map);
           }}
-          onCenterChanged={(map) => {
-            const centerPos = map.getCenter();
+          onZoomChanged={(map) => {
             setCenter({
-              lat: centerPos.getLat(),
-              lng: centerPos.getLng(),
+              lat: map.getCenter().getLat(),
+              lng: map.getCenter().getLng(),
             });
+            setLevel(map.getLevel());
           }}
         >
           {!!currentPosition && (
@@ -426,9 +502,11 @@ export default function BasicMap() {
 
           {/* 클러스터 모드 (마커 모드 통합) */}
           {visualizationMode === "cluster" &&
-            (securityLights.length > 0 || safeReturnPaths.length > 0) && (
+            (securityLights.length > 0 ||
+              safeReturnPaths.length > 0 ||
+              emergencyBells.length > 0) && (
               <MarkerClusterer
-                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
+                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}-${emergencyBells.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
                 averageCenter={true}
                 minLevel={1} // 줌 레벨 제한 해제 (모든 레벨에서 클러스터링 동작하되, 확대 시 마커가 보임)
                 // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수
@@ -487,10 +565,13 @@ export default function BasicMap() {
 
           {/* 히트맵 모드 */}
           {visualizationMode === "heatmap" &&
-            (securityLights.length > 0 || safeReturnPaths.length > 0) && (
+            (securityLights.length > 0 ||
+              safeReturnPaths.length > 0 ||
+              emergencyBells.length > 0) && (
               <HeatmapLayer
                 data={securityLights}
                 safeReturnPaths={safeReturnPaths}
+                emergencyBells={emergencyBells}
               />
             )}
 

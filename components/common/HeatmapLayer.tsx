@@ -9,6 +9,10 @@ interface HeatmapLayerProps {
     end_latitude: number;
     end_longitude: number;
   }>; // 안심 귀갓길 데이터 (옵션)
+  emergencyBells?: Array<{
+    latitude: number;
+    longitude: number;
+  }>; // 비상벨 데이터 (옵션)
 }
 
 interface GridCell {
@@ -23,16 +27,18 @@ interface GridCell {
 export default function HeatmapLayer({
   data,
   safeReturnPaths,
+  emergencyBells,
 }: HeatmapLayerProps) {
   const map = useMap(); // 부모 Map 컴포넌트의 인스턴스를 가져옵니다.
   const [gridCells, setGridCells] = useState<GridCell[]>([]);
 
   useEffect(() => {
-    // 데이터가 없으면 렌더링 안 함 (둘 다 없을 때)
+    // 데이터가 없으면 렌더링 안 함 (셋 다 없을 때)
     if (
       !map ||
       ((!data || data.length === 0) &&
-        (!safeReturnPaths || safeReturnPaths.length === 0))
+        (!safeReturnPaths || safeReturnPaths.length === 0) &&
+        (!emergencyBells || emergencyBells.length === 0))
     )
       return;
 
@@ -69,6 +75,17 @@ export default function HeatmapLayer({
         });
       }
 
+      // 비상벨 포인트 추출
+      const bellPoints: { latitude: number; longitude: number }[] = [];
+      if (emergencyBells) {
+        emergencyBells.forEach((bell) => {
+          bellPoints.push({
+            latitude: bell.latitude,
+            longitude: bell.longitude,
+          });
+        });
+      }
+
       // 2. 각 격자(Cell)별 데이터 카운팅
       for (let i = 0; i < gridSize; i++) {
         for (let j = 0; j < gridSize; j++) {
@@ -101,8 +118,17 @@ export default function HeatmapLayer({
               point.longitude < cellNeLng
           ).length;
 
-          // 안심 귀갓길은 가중치를 10배로 적용
-          const count = lightCount + safePathCount * 10;
+          // 현재 격자에 포함되는 비상벨 포인트 필터링
+          const bellCount = bellPoints.filter(
+            (point) =>
+              point.latitude >= cellSwLat &&
+              point.latitude < cellNeLat &&
+              point.longitude >= cellSwLng &&
+              point.longitude < cellNeLng
+          ).length;
+
+          // 안심 귀갓길과 비상벨은 가중치를 10배로 적용
+          const count = lightCount + safePathCount * 10 + bellCount * 10;
 
           if (count > 0) {
             if (count > maxCount) maxCount = count;
@@ -155,7 +181,7 @@ export default function HeatmapLayer({
     return () => {
       kakao.maps.event.removeListener(map, "idle", handleIdle);
     };
-  }, [map, data, safeReturnPaths]);
+  }, [map, data, safeReturnPaths, emergencyBells]);
 
   return (
     <>

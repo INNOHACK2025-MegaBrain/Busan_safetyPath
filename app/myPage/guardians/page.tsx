@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { useUserStore } from "@/store/userStore";
 
 interface Guardian {
   id: string;
@@ -42,8 +43,6 @@ interface Guardian {
   priority?: number;
   created_at: string;
 }
-
-import { useUserStore } from "@/store/userStore";
 
 export default function GuardiansPage() {
   const router = useRouter();
