@@ -6,6 +6,7 @@ import FloatingMenuButton from "@/components/layout/FloatingMenuButton";
 import FloatingReportButton from "@/components/layout/FloatingReportButton";
 import SearchSheet from "@/components/layout/SearchSheet";
 import RouteSheet from "@/components/layout/RouteSheet";
+import ReportSheet from "@/components/layout/ReportSheet";
 
 export type Screen = "home" | "riskMap" | "sos" | "mypage";
 
@@ -16,6 +17,7 @@ export default function Home() {
       <Menu />
       <SearchSheet />
       <RouteSheet />
+      <ReportSheet />
       <FloatingMenuButton />
       <FloatingReportButton />
       <main className="w-full flex-1 pt-16">
