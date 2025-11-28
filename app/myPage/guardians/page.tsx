@@ -33,24 +33,42 @@ import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { useUserStore } from "@/store/userStore";
 
+type GuardianStatus = "pending" | "accepted" | "declined" | "revoked";
+
+interface GuardianPartner {
+  id: string | null;
+  email: string | null;
+  name: string;
+  phone: string | null;
+}
+
 interface Guardian {
   id: string;
-  guardian_id: string;
-  email: string;
-  name: string;
-  phone?: string;
-  relation?: string;
-  priority?: number;
+  status: GuardianStatus;
+  isRequester: boolean;
+  partner: GuardianPartner;
+  relation: string;
+  priority: number;
   created_at: string;
+  responded_at: string | null;
+}
+
+interface GuardianResponse {
+  guardians: Guardian[];
+  incomingRequests: Guardian[];
+  outgoingRequests: Guardian[];
 }
 
 export default function GuardiansPage() {
   const router = useRouter();
   const { checkAuth } = useUserStore();
   const [guardians, setGuardians] = useState<Guardian[]>([]);
+  const [incomingRequests, setIncomingRequests] = useState<Guardian[]>([]);
+  const [outgoingRequests, setOutgoingRequests] = useState<Guardian[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [respondingId, setRespondingId] = useState<string | null>(null);
 
   // 폼 상태
   const [email, setEmail] = useState("");
@@ -79,12 +97,13 @@ export default function GuardiansPage() {
       });
 
       if (response.ok) {
-        const data = await response.json();
-        // 우선순위 정렬 (1순위가 먼저)
+        const data = (await response.json()) as GuardianResponse;
         const sortedGuardians = (data.guardians || []).sort(
-          (a: Guardian, b: Guardian) => (a.priority || 99) - (b.priority || 99)
+          (a, b) => (a.priority || 99) - (b.priority || 99)
         );
         setGuardians(sortedGuardians);
+        setIncomingRequests(data.incomingRequests || []);
+        setOutgoingRequests(data.outgoingRequests || []);
       } else {
         throw new Error("Failed to fetch guardians");
       }
@@ -177,12 +196,105 @@ export default function GuardiansPage() {
       }
 
       toast.success("보호자가 삭제되었습니다.");
-      setGuardians((prev) => prev.filter((g) => g.id !== id));
+      fetchGuardians();
     } catch (error) {
       console.error("삭제 오류:", error);
       toast.error("보호자 삭제에 실패했습니다.");
     }
   };
+
+  const handleRespondRequest = async (
+    id: string,
+    decision: "accept" | "decline"
+  ) => {
+    setRespondingId(id);
+    try {
+      await checkAuth();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        toast.error("로그인이 필요합니다.");
+        return;
+      }
+
+      const response = await fetch("/api/guardians", {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ id, action: "respond", decision }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "요청 처리에 실패했습니다.");
+      }
+
+      toast.success(
+        decision === "accept" ? "요청을 수락했습니다." : "요청을 거절했습니다."
+      );
+      fetchGuardians();
+    } catch (error) {
+      console.error("요청 처리 실패:", error);
+      toast.error(
+        error instanceof Error ? error.message : "요청 처리에 실패했습니다."
+      );
+    } finally {
+      setRespondingId(null);
+    }
+  };
+
+  const RequestCard = ({
+    item,
+    isIncoming,
+  }: {
+    item: Guardian;
+    isIncoming: boolean;
+  }) => (
+    <Card className="p-4 flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="font-semibold text-foreground">{item.partner.name}</p>
+          <p className="text-sm text-muted-foreground">{item.partner.email}</p>
+        </div>
+        <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+          {item.relation}
+        </span>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {isIncoming
+          ? "상대방이 당신을 보호자로 초대했습니다."
+          : "상대방의 수락을 기다리고 있습니다."}
+      </p>
+      {isIncoming ? (
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            className="flex-1"
+            disabled={respondingId === item.id}
+            onClick={() => handleRespondRequest(item.id, "decline")}
+          >
+            거절
+          </Button>
+          <Button
+            className="flex-1"
+            disabled={respondingId === item.id}
+            onClick={() => handleRespondRequest(item.id, "accept")}
+          >
+            수락
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          요청일: {new Date(item.created_at).toLocaleDateString()}
+        </p>
+      )}
+    </Card>
+  );
 
   return (
     <div className="flex flex-col h-full bg-background min-h-screen">
@@ -289,6 +401,28 @@ export default function GuardiansPage() {
           </Dialog>
         </div>
 
+        {incomingRequests.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-primary">
+              받은 보호자 요청 ({incomingRequests.length})
+            </h3>
+            {incomingRequests.map((request) => (
+              <RequestCard key={request.id} item={request} isIncoming />
+            ))}
+          </section>
+        )}
+
+        {outgoingRequests.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-muted-foreground">
+              내가 보낸 요청 ({outgoingRequests.length})
+            </h3>
+            {outgoingRequests.map((request) => (
+              <RequestCard key={request.id} item={request} isIncoming={false} />
+            ))}
+          </section>
+        )}
+
         {isLoading ? (
           <div className="space-y-3">
             {[1, 2].map((i) => (
@@ -314,18 +448,19 @@ export default function GuardiansPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <p className="font-medium text-foreground">
-                        {guardian.name}
+                        {guardian.partner.name}
                       </p>
                       <span className="text-xs px-1.5 py-0.5 bg-secondary text-secondary-foreground rounded-full">
                         {guardian.relation || "기타"}
                       </span>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {guardian.email}
+                      {guardian.partner.email}
                     </p>
-                    {guardian.phone && (
+                    {guardian.partner.phone && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                        <PhoneIcon className="h-3 w-3" /> {guardian.phone}
+                        <PhoneIcon className="h-3 w-3" />{" "}
+                        {guardian.partner.phone}
                       </p>
                     )}
                   </div>

@@ -2,7 +2,8 @@
 
 import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import useKakaoLoader from "@/hooks/useKakaoLoader";
-import { useRef, useState, useEffect, useMemo } from "react";
+import { useRef, useState, useEffect, useMemo, useCallback } from "react";
+import type { ReactElement } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
 import { MapMarker } from "react-kakao-maps-sdk";
 import {
@@ -18,6 +19,8 @@ import { useMapStore } from "@/store/mapStore";
 import { useUIStore } from "@/store/uiStore";
 import { Toggle } from "@/components/ui/toggle";
 import HeatmapLayer from "./HeatmapLayer";
+import { supabase } from "@/lib/supabase";
+import { toast } from "sonner";
 
 // 클러스터 데이터 타입 정의
 interface ClusterProperties {
@@ -47,6 +50,7 @@ export default function BasicMap() {
   const [visualizationMode, setVisualizationMode] = useState<
     "none" | "cluster" | "heatmap"
   >("none"); // 기본값은 none 유지
+  const [followTargetId, setFollowTargetId] = useState<string | null>(null);
 
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
   const {
@@ -67,6 +71,8 @@ export default function BasicMap() {
     cctvs,
     setCctvs,
     setLevel,
+    sosTargets,
+    setSosTargets,
   } = useMapStore();
   const { openModal } = useUIStore();
   const [loading, setLoading] = useState(true);
@@ -95,6 +101,78 @@ export default function BasicMap() {
     // routePath가 없으면 경로 표시 안 함
     return [];
   }, [routePath]);
+
+  const incomingTargets = useMemo(
+    () => sosTargets.filter((target) => !target.triggeredByMe),
+    [sosTargets]
+  );
+  const outgoingTargets = useMemo(
+    () => sosTargets.filter((target) => target.triggeredByMe),
+    [sosTargets]
+  );
+
+  const primaryIncomingTarget = useMemo(() => {
+    if (followTargetId) {
+      return (
+        incomingTargets.find((target) => target.id === followTargetId) || null
+      );
+    }
+    return incomingTargets[0] || null;
+  }, [followTargetId, incomingTargets]);
+
+  const centerOnTarget = useCallback(
+    (target?: (typeof sosTargets)[number] | null) => {
+      if (!target) return;
+      if (
+        typeof target.latitude !== "number" ||
+        typeof target.longitude !== "number" ||
+        Number.isNaN(target.latitude) ||
+        Number.isNaN(target.longitude)
+      ) {
+        return;
+      }
+      setCenter({ lat: target.latitude, lng: target.longitude });
+    },
+    [setCenter]
+  );
+
+  useEffect(() => {
+    centerOnTarget(primaryIncomingTarget);
+  }, [centerOnTarget, primaryIncomingTarget]);
+
+  const handleFollowTarget = useCallback(
+    (target?: (typeof sosTargets)[number] | null) => {
+      if (!target) return;
+      setFollowTargetId(target.id);
+      centerOnTarget(target);
+    },
+    [centerOnTarget]
+  );
+
+  const getDisplayName = useCallback(
+    (target?: (typeof sosTargets)[number] | null) => {
+      if (!target) return "보호자";
+      return target.partnerName || target.partnerEmail || "보호자";
+    },
+    []
+  );
+
+  const outgoingStatusLabel = useMemo(() => {
+    if (outgoingTargets.length === 0) {
+      return "";
+    }
+
+    const primary = outgoingTargets[0];
+    const name = getDisplayName(primary);
+
+    if (outgoingTargets.length === 1) {
+      return `${name} 님에게 위치가 공유중입니다.`;
+    }
+
+    return `${name} 님 외 ${
+      outgoingTargets.length - 1
+    }명에게 위치가 공유중입니다.`;
+  }, [getDisplayName, outgoingTargets]);
 
   useEffect(() => {
     // 현재 위치가 이미 있으면 로딩 완료
@@ -389,6 +467,128 @@ export default function BasicMap() {
     mapInstance,
   ]);
 
+  useEffect(() => {
+    let isMounted = true;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+    const fetchActiveSos = async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          if (isMounted) {
+            setSosTargets([]);
+          }
+          return;
+        }
+
+        const response = await fetch("/api/guardians/active-sos", {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+
+        if (!response.ok) {
+          if (response.status === 401 && isMounted) {
+            setSosTargets([]);
+          }
+          return;
+        }
+
+        const data = await response.json();
+        if (!isMounted) return;
+        setSosTargets(data.sessions || []);
+      } catch (error) {
+        if (process.env.NODE_ENV === "development") {
+          console.error("[지도] 보호자 SOS 조회 실패:", error);
+        }
+      }
+    };
+
+    fetchActiveSos();
+    pollTimer = setInterval(fetchActiveSos, 10_000);
+
+    return () => {
+      isMounted = false;
+      if (pollTimer) {
+        clearInterval(pollTimer);
+      }
+    };
+  }, [setSosTargets]);
+
+  const notifyIncomingSos = useCallback(
+    (target: (typeof sosTargets)[number]) => {
+      const displayName = target.partnerName || target.partnerEmail || "보호자";
+      const message = `${displayName} 님이 SOS 위치를 공유 중입니다.`;
+
+      const showToast = () =>
+        toast.warning(message, {
+          description: "지도를 열어 현재 위치를 확인하세요.",
+          duration: 6000,
+        });
+
+      if (typeof window === "undefined" || !("Notification" in window)) {
+        showToast();
+        return;
+      }
+
+      const sendBrowserNotification = () => {
+        try {
+          new Notification("SOS 알림", {
+            body: message,
+            icon: "/icons/sos.png",
+            tag: `sos-${target.id}`,
+          });
+        } catch (error) {
+          if (process.env.NODE_ENV === "development") {
+            console.error("[지도] Notification 생성 실패", error);
+          }
+          showToast();
+        }
+      };
+
+      if (Notification.permission === "granted") {
+        sendBrowserNotification();
+        return;
+      }
+
+      if (Notification.permission === "default") {
+        Notification.requestPermission()
+          .then((permission) => {
+            if (permission === "granted") {
+              sendBrowserNotification();
+            } else {
+              showToast();
+            }
+          })
+          .catch(() => {
+            showToast();
+          });
+        return;
+      }
+
+      showToast();
+    },
+    []
+  );
+
+  const previousSosIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const prevIds = previousSosIdsRef.current;
+    const currentIds = new Set<string>();
+
+    sosTargets.forEach((target) => {
+      currentIds.add(target.id);
+      if (!target.triggeredByMe && !prevIds.has(target.id)) {
+        notifyIncomingSos(target);
+      }
+    });
+
+    previousSosIdsRef.current = currentIds;
+  }, [notifyIncomingSos, sosTargets]);
+
   // 5. [서버 사이드 클러스터링 요청]
   // mapStore에 클러스터 데이터를 저장할 state 추가 필요 (현재는 로컬 state 사용)
   const [serverClusters, setServerClusters] = useState<ClusterFeature[]>([]);
@@ -576,6 +776,59 @@ export default function BasicMap() {
     });
   };
 
+  const renderSosMarkers = () => {
+    if (!sosTargets || sosTargets.length === 0) {
+      return null;
+    }
+
+    const sosIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2240%22%20height%3D%2240%22%20viewBox%3D%220%200%2040%2040%22%3E%3Ccircle%20cx%3D%2220%22%20cy%3D%2220%22%20r%3D%2218%22%20fill%3D%22white%22%20stroke%3D%22%23DC2626%22%20stroke-width%3D%223%22%2F%3E%3Ctext%20x%3D%2220%22%20y%3D%2225%22%20text-anchor%3D%22middle%22%20font-size%3D%2212%22%20font-family%3D%22Arial%22%20font-weight%3D%22bold%22%20fill%3D%22%23DC2626%22%3ESOS%3C%2Ftext%3E%3C%2Fsvg%3E";
+
+    const elements = [] as ReactElement[];
+
+    sosTargets
+      .filter((target) => !target.triggeredByMe)
+      .forEach((target) => {
+        if (
+          typeof target.latitude !== "number" ||
+          typeof target.longitude !== "number" ||
+          Number.isNaN(target.latitude) ||
+          Number.isNaN(target.longitude)
+        ) {
+          return;
+        }
+
+        const markerKey = `sos-${target.id}`;
+        const labelKey = `sos-label-${target.id}`;
+        const name = target.partnerName || target.partnerEmail;
+
+        elements.push(
+          <MapMarker
+            key={markerKey}
+            position={{ lat: target.latitude, lng: target.longitude }}
+            title={`${name} SOS 위치`}
+            image={{
+              src: sosIcon,
+              size: { width: 44, height: 44 },
+            }}
+          />
+        );
+
+        elements.push(
+          <CustomOverlayMap
+            key={labelKey}
+            position={{ lat: target.latitude, lng: target.longitude }}
+          >
+            <div className="bg-destructive text-destructive-foreground text-xs font-semibold px-2 py-1 rounded-full shadow-lg">
+              {name} 위치 공유 중
+            </div>
+          </CustomOverlayMap>
+        );
+      });
+
+    return elements;
+  };
+
   if (loading) {
     return (
       <div className="w-full h-[350px] flex items-center justify-center bg-gray-100">
@@ -645,6 +898,8 @@ export default function BasicMap() {
           {/* 클러스터 모드 (서버 사이드 클러스터링) */}
           {visualizationMode === "cluster" && <>{renderServerClusters()}</>}
 
+          {renderSosMarkers()}
+
           {/* 히트맵 모드 */}
           {visualizationMode === "heatmap" &&
             (securityLights.length > 0 ||
@@ -710,6 +965,27 @@ export default function BasicMap() {
             </>
           )}
         </Map>
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-[1000] flex max-w-[90%] -translate-x-1/2 flex-col items-center gap-2">
+          {primaryIncomingTarget && (
+            <button
+              type="button"
+              onClick={() => handleFollowTarget(primaryIncomingTarget)}
+              className="pointer-events-auto w-full rounded-2xl bg-destructive px-5 py-3 text-sm font-medium text-destructive-foreground shadow-lg"
+            >
+              <span className="font-semibold">
+                {getDisplayName(primaryIncomingTarget)}
+              </span>{" "}
+              님에게 SOS 호출을 받았습니다.
+              <br />
+              클릭하여 위치를 확인하세요.
+            </button>
+          )}
+          {outgoingStatusLabel && (
+            <div className="pointer-events-none w-full rounded-2xl bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-lg">
+              {outgoingStatusLabel}
+            </div>
+          )}
+        </div>
         {/* 시각화 모드 전환 토글 */}
         <div className="absolute top-4 left-4 z-10">
           <div className="flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">

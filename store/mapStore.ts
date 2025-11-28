@@ -60,6 +60,17 @@ interface MapStore {
     light: number;
     roadSafety: number;
   };
+  sosTargets: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    partnerName: string;
+    partnerEmail: string;
+    startedAt: string;
+    expiresAt?: string | null;
+    precision?: number | null;
+    triggeredByMe: boolean;
+  }>;
   setCurrentPosition: (position: Coord | null) => void;
   setCenter: (center: Coord) => void;
   setLevel: (level: number) => void;
@@ -73,6 +84,7 @@ interface MapStore {
   setEmergencyBells: (bells: MapStore["emergencyBells"]) => void;
   setCctvs: (cctvs: MapStore["cctvs"]) => void;
   setWeight: (key: keyof MapStore["weights"], value: number) => void;
+  setSosTargets: (targets: MapStore["sosTargets"]) => void;
   resetSelectedPoints: () => void;
 }
 
@@ -93,6 +105,7 @@ export const useMapStore = create<MapStore>((set) => ({
     light: 1,
     roadSafety: 1,
   },
+  sosTargets: [],
   currentPosition: null,
   setCurrentPosition: (position) => set({ currentPosition: position }),
   setCenter: (center) => set({ center }),
@@ -123,6 +136,8 @@ export const useMapStore = create<MapStore>((set) => ({
     set((state) => ({
       weights: { ...state.weights, [key]: value },
     })),
+
+  setSosTargets: (targets) => set({ sosTargets: targets }),
 
   resetSelectedPoints: () => set({ selectedPoint: {} }),
 }));
