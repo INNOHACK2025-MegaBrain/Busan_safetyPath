@@ -11,7 +11,12 @@ import useKakaoLoader from "@/hooks/useKakaoLoader";
 export default function RouteSheet() {
   useKakaoLoader();
   const { isModalOpen, modalType, closeModal } = useUIStore();
-  const { destinationInfo, currentPosition, setRoutePath } = useMapStore();
+  const {
+    destinationInfo,
+    currentPosition,
+    setRoutePath,
+    setShowDestinationOverlay,
+  } = useMapStore();
   const [isCalculating, setIsCalculating] = useState(false);
 
   const isRouteOpen = isModalOpen && modalType === "route";
@@ -68,7 +73,16 @@ export default function RouteSheet() {
       if (!response.ok) {
         const errorData = await response.json();
         console.error("경로 계산 API 오류:", response.status, errorData);
-        alert("경로를 찾을 수 없습니다. 다른 경로를 시도해주세요.");
+
+        // 거리 제한 초과 에러 처리
+        if (
+          errorData.error === "거리 제한 초과" ||
+          errorData.message?.includes("너무 먼 거리")
+        ) {
+          alert("너무 먼 거리의 경로를 선택하셨습니다.");
+        } else {
+          alert("경로를 찾을 수 없습니다. 다른 경로를 시도해주세요.");
+        }
         setIsCalculating(false);
         return;
       }
@@ -79,11 +93,20 @@ export default function RouteSheet() {
       // 에러 응답 확인
       if (data.error) {
         console.error("경로 계산 에러:", data);
-        alert(
-          `${data.error}\n${
-            data.message || ""
-          }\n\n지하철역의 경우 지상 출입구 좌표를 사용해주세요.`
-        );
+
+        // 거리 제한 초과 에러 처리
+        if (
+          data.error === "거리 제한 초과" ||
+          data.message?.includes("너무 먼 거리")
+        ) {
+          alert("너무 먼 거리의 경로를 선택하셨습니다.");
+        } else {
+          alert(
+            `${data.error}\n${
+              data.message || ""
+            }\n\n지하철역의 경우 지상 출입구 좌표를 사용해주세요.`
+          );
+        }
         setIsCalculating(false);
         return;
       }
@@ -112,6 +135,8 @@ export default function RouteSheet() {
             });
           }
 
+          // 목적지 오버레이 닫기
+          setShowDestinationOverlay(false);
           closeModal();
         } else {
           console.error("경로 포인트를 추출할 수 없습니다");

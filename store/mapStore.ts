@@ -21,6 +21,16 @@ interface MapStore {
 
   destinationInfo: DestinationInfo | null;
   routePath: Coord[] | null; // 계산된 경로
+  showDestinationOverlay: boolean; // 목적지 오버레이 표시 여부
+  securityLights: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    si_do?: string;
+    si_gun_gu?: string;
+    eup_myeon_dong?: string;
+    address_lot?: string;
+  }>; // 보안등 정보
   weights: {
     cctv: number;
     crime: number;
@@ -34,6 +44,8 @@ interface MapStore {
   setSelectedEnd: (coord: Coord) => void;
   setDestinationInfo: (info: DestinationInfo | null) => void;
   setRoutePath: (path: Coord[] | null) => void;
+  setShowDestinationOverlay: (show: boolean) => void;
+  setSecurityLights: (lights: MapStore["securityLights"]) => void;
   setWeight: (key: keyof MapStore["weights"], value: number) => void;
   resetSelectedPoints: () => void;
 }
@@ -44,6 +56,8 @@ export const useMapStore = create<MapStore>((set) => ({
   selectedPoint: {},
   destinationInfo: null,
   routePath: null,
+  showDestinationOverlay: false,
+  securityLights: [],
   weights: {
     cctv: 1,
     crime: 1,
@@ -67,6 +81,9 @@ export const useMapStore = create<MapStore>((set) => ({
 
   setDestinationInfo: (info) => set({ destinationInfo: info }),
   setRoutePath: (path) => set({ routePath: path }),
+  setShowDestinationOverlay: (show) => set({ showDestinationOverlay: show }),
+  setSecurityLights: (lights: MapStore["securityLights"]) =>
+    set({ securityLights: lights }),
 
   setWeight: (key, value) =>
     set((state) => ({

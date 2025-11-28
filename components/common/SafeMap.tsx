@@ -1,24 +1,32 @@
 "use client";
 
 import { Map, Polyline, MapMarker } from "react-kakao-maps-sdk";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import useKakaoLoader from "@/hooks/useKakaoLoader";
 import { useMapStore } from "@/store/mapStore";
 
 export default function SafeMap() {
   useKakaoLoader();
-  const { currentPosition, destinationInfo, routePath, weights } = useMapStore();
+  const { currentPosition, destinationInfo, routePath, weights } =
+    useMapStore();
 
   // 출발지와 도착지 설정
-  const startPoint = currentPosition || { lat: 37.5665, lng: 126.9780 }; // 기본값: 서울시청
-  const endPoint = destinationInfo?.coord || { lat: 37.4979, lng: 127.0276 }; // 기본값: 강남역
+  const startPoint = useMemo(
+    () => currentPosition || { lat: 37.5665, lng: 126.978 },
+    [currentPosition]
+  ); // 기본값: 서울시청
+  const endPoint = useMemo(
+    () => destinationInfo?.coord || { lat: 37.4979, lng: 127.0276 },
+    [destinationInfo]
+  ); // 기본값: 강남역
 
-  const [localRoutePath, setLocalRoutePath] = useState<Array<{ lat: number; lng: number }>>([]);
+  const [localRoutePath, setLocalRoutePath] = useState<
+    Array<{ lat: number; lng: number }>
+  >([]);
 
   // routePath가 있으면 사용, 없으면 API에서 가져오기
   useEffect(() => {
     if (routePath && routePath.length > 0) {
-      setLocalRoutePath(routePath);
       return;
     }
 
@@ -56,7 +64,14 @@ export default function SafeMap() {
 
       fetchRoute();
     }
-  }, [routePath, startPoint, endPoint, currentPosition, destinationInfo, weights]);
+  }, [
+    routePath,
+    startPoint,
+    endPoint,
+    currentPosition,
+    destinationInfo,
+    weights,
+  ]);
 
   return (
     <Map
@@ -69,9 +84,10 @@ export default function SafeMap() {
       {endPoint && <MapMarker position={endPoint} title="도착지" />}
 
       {/* 안심 경로 그리기 (초록색 선) */}
-      {localRoutePath.length > 0 && (
+      {(routePath && routePath.length > 0 ? routePath : localRoutePath).length >
+        0 && (
         <Polyline
-          path={localRoutePath}
+          path={routePath && routePath.length > 0 ? routePath : localRoutePath}
           strokeWeight={6}
           strokeColor={"#00FF00"}
           strokeOpacity={0.8}
@@ -81,4 +97,3 @@ export default function SafeMap() {
     </Map>
   );
 }
-

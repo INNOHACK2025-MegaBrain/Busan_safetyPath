@@ -2,14 +2,11 @@
 
 import { AlertTriangle } from "lucide-react";
 import { useUIStore } from "@/store/uiStore";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function FloatingReportButton() {
   const { openModal } = useUIStore();
-
-  const handleReport = () => {
-    // 신고 기능 구현
-    openModal("report");
-  };
+  const handleReport = useRequireAuth(() => openModal("report"));
 
   return (
     <div className="fixed bottom-6 left-6 z-50">
