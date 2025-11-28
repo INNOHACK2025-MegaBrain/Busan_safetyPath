@@ -119,3 +119,17 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Toast가 floating 버튼을 가리지 않도록 하단 마진 추가 */
+@layer utilities {
+  [data-sonner-toaster] {
+    bottom: 100px !important;
+  }
+
+  /* 모바일 화면에서는 더 많은 여유 공간 */
+  @media (max-width: 640px) {
+    [data-sonner-toaster] {
+      bottom: 110px !important;
+    }
+  }
+}
