@@ -21,10 +21,31 @@ interface PlaceResult {
   y: string; // lat
 }
 
+// 두 좌표 간 거리 계산 (Haversine formula) - km 단위
+function calculateDistance(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const R = 6371; // 지구 반경 (km)
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 export default function SearchSheet() {
   useKakaoLoader();
   const { isModalOpen, modalType, closeModal, openModal } = useUIStore();
-  const { setCenter, setSelectedEnd, setDestinationInfo } = useMapStore();
+  const { setCenter, setSelectedEnd, setDestinationInfo, currentPosition } =
+    useMapStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -89,13 +110,30 @@ export default function SearchSheet() {
         setIsSearching(false);
 
         if (status === kakao.maps.services.Status.OK) {
-          const places: PlaceResult[] = data.map((place: any) => ({
+          let places: PlaceResult[] = data.map((place: any) => ({
             place_name: place.place_name,
             address_name: place.address_name,
             road_address_name: place.road_address_name,
             x: place.x,
             y: place.y,
           }));
+
+          // 현재 위치가 있으면 거리순으로 정렬
+          if (currentPosition) {
+            places = places
+              .map((place) => {
+                const distance = calculateDistance(
+                  currentPosition.lat,
+                  currentPosition.lng,
+                  parseFloat(place.y),
+                  parseFloat(place.x)
+                );
+                return { ...place, distance };
+              })
+              .sort((a, b) => (a.distance || 0) - (b.distance || 0))
+              .map(({ distance, ...place }) => place); // distance 제거
+          }
+
           setResults(places);
         } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
           setResults([]);
