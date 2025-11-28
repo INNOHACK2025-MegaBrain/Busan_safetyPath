@@ -28,6 +28,10 @@ export default function BasicMap() {
     "none" | "markers" | "cluster" | "heatmap"
   >("none"); // 기본값은 none 유지
 
+  // state 추가 (27줄 근처)
+  const [clustererInstance, setClustererInstance] =
+    useState<kakao.maps.MarkerClusterer | null>(null);
+
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
   const {
     center,
@@ -269,9 +273,6 @@ export default function BasicMap() {
 
   // 보안등 밀도 계산 및 Zone 오버레이
   useEffect(() => {
-    // heatmap 모드가 아니면 아무것도 안 함
-    if (visualizationMode !== "heatmap") return;
-
     const map = mapInstance || mapRef.current;
     if (!map || !securityLights || securityLights.length === 0) {
       return;
@@ -368,7 +369,7 @@ export default function BasicMap() {
     return () => {
       overlays.forEach((overlay) => overlay.setMap(null));
     };
-  }, [mapInstance, securityLights, visualizationMode]); // visualizationMode 의존성 추가
+  }, [mapInstance, securityLights]);
 
   // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
   const renderMarkers = () => {
@@ -408,6 +409,128 @@ export default function BasicMap() {
       });
   };
 
+  // 클러스터 모드 변경 시 클러스터 제거 (renderMarkers 함수 전에 추가)
+  useEffect(() => {
+    const map = mapInstance || mapRef.current;
+    if (!map) return;
+
+    // 클러스터 모드가 아닐 때 클러스터 제거
+    if (visualizationMode !== "cluster") {
+      // 카카오맵의 모든 마커를 제거하는 방법
+      // MarkerClusterer가 내부적으로 관리하므로,
+      // 모드가 변경되면 React가 자동으로 언마운트하지만
+      // 혹시 모를 경우를 대비해 명시적으로 처리
+      // 지도에서 모든 오버레이 제거 (클러스터 마커 포함)
+      // 주의: 이 방법은 다른 오버레이도 제거할 수 있으므로 신중하게 사용
+    }
+  }, [mapInstance, visualizationMode]);
+
+  // 클러스터 모드 관리 useEffect 추가 (renderMarkers 함수 전에)
+  useEffect(() => {
+    const map = mapInstance || mapRef.current;
+    if (!map) return;
+
+    // 클러스터 모드가 아니면 기존 클러스터 제거
+    if (visualizationMode !== "cluster") {
+      if (clustererInstance) {
+        clustererInstance.clear();
+        setClustererInstance(null);
+      }
+      return;
+    }
+
+    // 클러스터 모드이고 보안등 데이터가 있을 때만 클러스터 생성
+    if (!securityLights || securityLights.length === 0) return;
+
+    // 기존 클러스터가 있으면 먼저 제거
+    if (clustererInstance) {
+      clustererInstance.clear();
+    }
+
+    // 마커 배열 생성
+    const markers = securityLights
+      .filter((light) => {
+        return (
+          light.latitude &&
+          light.longitude &&
+          typeof light.latitude === "number" &&
+          typeof light.longitude === "number" &&
+          !isNaN(light.latitude) &&
+          !isNaN(light.longitude)
+        );
+      })
+      .map((light) => {
+        const title =
+          light.address_lot ||
+          `${light.si_do || ""} ${light.si_gun_gu || ""} ${
+            light.eup_myeon_dong || ""
+          }`.trim() ||
+          "보안등";
+
+        return new kakao.maps.Marker({
+          position: new kakao.maps.LatLng(light.latitude, light.longitude),
+          image: new kakao.maps.MarkerImage(
+            "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
+            new kakao.maps.Size(24, 35)
+          ),
+          title: title,
+        });
+      });
+
+    // 클러스터 생성
+    const clusterer = new kakao.maps.MarkerClusterer({
+      map: map,
+      markers: markers,
+      averageCenter: true,
+      minLevel: 6,
+      calculator: [10, 30, 50],
+      styles: [
+        {
+          width: "30px",
+          height: "30px",
+          background: "rgba(59, 130, 246, 0.8)",
+          borderRadius: "50%",
+          color: "#fff",
+          textAlign: "center",
+          lineHeight: "30px",
+          fontWeight: "bold",
+          border: "1px solid rgba(59, 130, 246, 1)",
+        },
+        {
+          width: "40px",
+          height: "40px",
+          background: "rgba(245, 158, 11, 0.8)",
+          borderRadius: "50%",
+          color: "#fff",
+          textAlign: "center",
+          lineHeight: "40px",
+          fontWeight: "bold",
+          border: "1px solid rgba(245, 158, 11, 1)",
+        },
+        {
+          width: "50px",
+          height: "50px",
+          background: "rgba(239, 68, 68, 0.8)",
+          borderRadius: "50%",
+          color: "#fff",
+          textAlign: "center",
+          lineHeight: "50px",
+          fontWeight: "bold",
+          border: "1px solid rgba(239, 68, 68, 1)",
+        },
+      ],
+    });
+
+    setClustererInstance(clusterer);
+
+    // 클린업
+    return () => {
+      if (clusterer) {
+        clusterer.clear();
+      }
+    };
+  }, [mapInstance, visualizationMode, securityLights]);
+
   if (loading) {
     return (
       <div className="w-full h-[350px] flex items-center justify-center bg-gray-100">
@@ -445,18 +568,6 @@ export default function BasicMap() {
               lng: centerPos.getLng(),
             });
           }}
-          onZoomChanged={(map) => {
-            // 클러스터 모드일 때 줌 레벨이 6보다 작으면(더 확대되면) 6으로 제한
-            if (visualizationMode === "cluster") {
-              const currentLevel = map.getLevel();
-              if (currentLevel < 6) {
-                // requestAnimationFrame을 사용하여 즉시 실행
-                requestAnimationFrame(() => {
-                  map.setLevel(6);
-                });
-              }
-            }
-          }}
         >
           {!!currentPosition && (
             <CustomOverlayMap position={currentPosition}>
@@ -487,54 +598,9 @@ export default function BasicMap() {
           {/* none 모드일 때는 아무것도 렌더링하지 않음 */}
 
           {/* 클러스터 모드 */}
-          {visualizationMode === "cluster" && (
-            <MarkerClusterer
-              averageCenter={true}
-              minLevel={6}
-              // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수 (기본값 사용해도 됨)
-              // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
-              styles={[
-                {
-                  // 1단계 (개수가 적을 때)
-                  width: "30px",
-                  height: "30px",
-                  background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "30px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(59, 130, 246, 1)",
-                },
-                {
-                  // 2단계 (개수가 중간일 때)
-                  width: "40px",
-                  height: "40px",
-                  background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "40px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(245, 158, 11, 1)",
-                },
-                {
-                  // 3단계 (개수가 많을 때)
-                  width: "50px",
-                  height: "50px",
-                  background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "50px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(239, 68, 68, 1)",
-                },
-              ]}
-            >
-              {renderMarkers()}
-            </MarkerClusterer>
-          )}
+          {/* 클러스터는 useEffect에서 직접 관리하므로 여기서는 렌더링하지 않음 */}
+          {visualizationMode === "cluster" && null}
+
           {/* 마커 모드 */}
           {visualizationMode === "markers" && renderMarkers()}
 
