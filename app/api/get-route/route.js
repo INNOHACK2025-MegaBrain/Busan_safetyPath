@@ -29,7 +29,7 @@ export async function POST(request) {
     // 도보는 10km 이하의 짧은 거리만 사용
     // 10km 초과면 자동차 프로필 사용 (안심길 우선은 가중치로 처리)
     let profile = "foot";
-    if (distance > 10) {
+    if (distance > 50) {
       profile = "car";
       console.log(
         `거리가 ${distance.toFixed(2)}km로 너무 멀어 자동차 프로필 사용`
