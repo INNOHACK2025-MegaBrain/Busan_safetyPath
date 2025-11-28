@@ -4,7 +4,7 @@ import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import useKakaoLoader from "@/hooks/useKakaoLoader";
 import { useRef, useState, useEffect, useMemo, useCallback } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
-import { MapMarker } from "react-kakao-maps-sdk";
+import { MapMarker, MarkerClusterer } from "react-kakao-maps-sdk";
 import {
   Navigation,
   MapPin,
@@ -20,26 +20,6 @@ import { Toggle } from "@/components/ui/toggle";
 import HeatmapLayer from "./HeatmapLayer";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-
-// 클러스터 데이터 타입 정의
-interface ClusterProperties {
-  cluster: boolean;
-  id?: string; // 클러스터가 아닐 때
-  point_count?: number; // 클러스터일 때
-  [key: string]: unknown;
-}
-
-interface ClusterGeometry {
-  type: "Point";
-  coordinates: [number, number];
-}
-
-interface ClusterFeature {
-  type: "Feature";
-  id?: number | string;
-  properties: ClusterProperties;
-  geometry: ClusterGeometry;
-}
 
 export default function BasicMap() {
   useKakaoLoader();
@@ -466,10 +446,6 @@ export default function BasicMap() {
     mapInstance,
   ]);
 
-   // 5. [서버 사이드 클러스터링 요청]
-  // mapStore에 클러스터 데이터를 저장할 state 추가 필요 (현재는 로컬 state 사용)
-  const [serverClusters, setServerClusters] = useState<ClusterFeature[]>([]);
-  
   // 보호자 SOS 위치 폴링
   useEffect(() => {
     let isMounted = true;
@@ -597,96 +573,13 @@ export default function BasicMap() {
   const renderMarkers = () => {
     const markers = [];
 
-  useEffect(() => {
-    const map = mapInstance || mapRef.current;
-    // 클러스터 모드가 아니거나 맵이 없으면 중단
-    if (!map || visualizationMode !== "cluster") return;
-
-    const fetchClusters = async () => {
-      const bounds = map.getBounds();
-      if (!bounds) return;
-
-      const sw = bounds.getSouthWest();
-      const ne = bounds.getNorthEast();
-      const zoom = map.getLevel(); // 카카오맵 줌 레벨 (낮을수록 확대)
-      // Supercluster는 줌 레벨이 높을수록 확대 (0~24).
-      // 카카오맵 레벨 1(최대 확대) ~= 구글 줌 18
-      // 카카오맵 레벨 14(최대 축소) ~= 구글 줌 5
-      // 변환 공식: 19 - zoom (대략적)
-      const clusterZoom = Math.max(0, 19 - zoom);
-
-      // 사용자가 지적한 문제: "bbox가 현재 저 왼쪽으로 고정되어있어서 그런거 아니야?"
-      // 해결: bbox를 현재 보고 있는 지도 영역이 아니라, '전체 영역'으로 요청하거나
-      // 혹은 사용자가 이동할 때마다 bbox를 갱신해서 가져와야 함.
-      // 현재 로직은 map.getBounds()를 사용하므로, 지도 이동 시마다 fetchClusters가 호출되어야 정상.
-      // 하지만 초기 로딩이나 특정 상황에서 bbox가 잘못 계산되거나,
-      // 전체 데이터를 보고 싶은데 현재 뷰포트만 가져오는 것이 문제일 수 있음.
-      //
-      // 만약 "전체 데이터를 클러스터링해서 보고 싶다"는 의도라면,
-      // 서버에서는 이미 전체 데이터를 로드하고 있으므로,
-      // 클라이언트에서 요청하는 bbox를 '대한민국 전체' 또는 '부산시 전체'로 넓게 잡아서 요청하는 것이 방법일 수 있음.
-      // 하지만 효율성을 위해 뷰포트 기반(bbox)으로 가져오는 것이 맞음.
-
-      // 사용자가 "왼쪽 부분만 렌더링 된다"고 한 것은
-      // 아마도 초기 로딩 시 map.getBounds()가 아직 설정되지 않았거나
-      // 초기 위치가 치우쳐져 있어서 그 부분만 가져왔고,
-      // 이후 이동 시 재요청이 제대로 안 되었을 가능성이 있음.
-
-      // 따라서, 여기서는 bbox를 현재 뷰포트보다 훨씬 넓게(buffer) 잡아서 요청하도록 수정.
-      // 현재 뷰포트의 2배 정도 넓게 잡아서 주변 데이터도 미리 가져오도록 함.
-
-      const latBuffer = (ne.getLat() - sw.getLat()) * 1.0; // 위아래로 1배 더
-      const lngBuffer = (ne.getLng() - sw.getLng()) * 1.0; // 좌우로 1배 더
-
-      const expandedSwLat = sw.getLat() - latBuffer;
-      const expandedSwLng = sw.getLng() - lngBuffer;
-      const expandedNeLat = ne.getLat() + latBuffer;
-      const expandedNeLng = ne.getLng() + lngBuffer;
-
-      const bbox = `${expandedSwLng},${expandedSwLat},${expandedNeLng},${expandedNeLat}`;
-
-      console.log(
-        `[Cluster] Fetching for zoom: ${zoom} -> ${clusterZoom}, bbox: ${bbox} (Expanded)`
-      );
-
-      try {
-        // 보안등, 안심귀갓길, 비상벨, CCTV 통합 클러스터 요청 (type=all)
-        const res = await fetch(
-          `/api/clusters?bbox=${bbox}&zoom=${clusterZoom}&type=all&force=true`
-        );
-        if (res.ok) {
-          const clusters = await res.json();
-          console.log(`[Cluster] Received ${clusters.length} clusters`);
-          setServerClusters(clusters);
-        } else {
-          console.error("[Cluster] API Error:", res.status, await res.text());
-        }
-      } catch (e) {
-        console.error("Failed to fetch clusters", e);
-      }
-    };
-
-    // 디바운스 또는 idle 이벤트에 연결
-    kakao.maps.event.addListener(map, "idle", fetchClusters);
-    fetchClusters(); // 초기 실행
-
-    return () => {
-      kakao.maps.event.removeListener(map, "idle", fetchClusters);
-    };
-  }, [mapInstance, visualizationMode]);
-
-  // 6. [서버 클러스터 렌더링]
-  const renderServerClusters = () => {
     // 아이콘 SVG Data URI (원형 배경 포함)
     const lightIcon =
-      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EAB308%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15%2014c.2-1%20.7-1.7%201.5-2.5%201-1%201.5-2%201.5-3.5A6%206%200%200%200%206%208c0%201%20.5%202%201.5%203.5.8.8%201.3%201.5%201.5%201.5%202.5%22%2F%3E%3Cpath%20d%3D%22M9%2018h6%22%2F%3E%3Cpath%20d%3D%22M10%2022h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
-
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EAB308%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15%2014c.2-1%20.7-1.7%201.5-2.5%201-1%201.5-2%201.5-3.5A6%206%200%200%200%206%208c0%201%20.5%202%201.5%203.5.8.8%201.3%201.5%201.5%202.5%22%2F%3E%3Cpath%20d%3D%22M9%2018h6%22%2F%3E%3Cpath%20d%3D%22M10%2022h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const footprintIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2%209.5a5.5%205.5%200%200%201%209.591-3.676.56.56%200%200%200%20.818%200A5.49%205.49%200%200%201%2022%209.5c0%202.29-1.5%204-3%205.5l-5.492%205.313a2%202%200%200%201-3%20.019L5%2015c-1.5-1.5-3-3.2-3-5.5%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
     const bellIcon =
       "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EF4444%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208a6%206%200%200%201%2012%200c0%207%203%209%203%209H3s3-2%203-9%22%2F%3E%3Cpath%20d%3D%22M10.3%2021a1.94%201.94%200%200%200%203.4%200%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
-
-    const footprintIcon =
-      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%233B82F6%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M19%2014c1.49-1.46%203-3.21%203-5.5A5.5%205.5%200%200%200%2016.5%203c-1.76%200-3%20.5-4.5%202-1.5-1.5-2.74-2-4.5-2A5.5%205.5%200%200%200%202%208.5c0%202.3%201.5%204.05%203%205.5l7%207Z%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
-
     const cctvIcon =
       "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M16.75%2012h3.632a1%201%200%200%201%20.894%201.447l-2.034%204.069a1%201%200%200%201-1.708.134l-2.124-2.97%22%2F%3E%3Cpath%20d%3D%22M17.106%209.053a1%201%200%200%201%20.447%201.341l-3.106%206.211a1%201%200%200%201-1.342.447L3.61%2012.3a2.92%202.92%200%200%201-1.3-3.91L3.69%205.6a2.92%202.92%200%200%201%203.92-1.3z%22%2F%3E%3Cpath%20d%3D%22M2%2019h3.76a2%202%200%200%200%201.8-1.1L9%2015%22%2F%3E%3Cpath%20d%3D%22M2%2021v-4%22%2F%3E%3Cpath%20d%3D%22M7%209h.01%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
     const sosIcon =
@@ -729,80 +622,69 @@ export default function BasicMap() {
       markers.push(...lightMarkers);
     }
 
-    if (!serverClusters || serverClusters.length === 0) {
-      return null;
+    // 안심 귀갓길 마커 (파란색) - 줌 레벨 5 이하일 때만 표시 (더 확대되었을 때)
+    // 카카오맵은 레벨이 낮을수록 확대된 상태임 (1: 가장 확대 ~ 14: 가장 축소)
+    if (
+      safeReturnPaths &&
+      safeReturnPaths.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const pathMarkers = safeReturnPaths.map((path) => (
+        <MapMarker
+          key={`path-${path.id}`}
+          position={{ lat: path.start_latitude, lng: path.start_longitude }}
+          title={`안심 귀갓길: ${path.start_address} ~ ${path.end_address}`}
+          image={{
+            src: footprintIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...pathMarkers);
     }
 
-    return serverClusters.map((cluster) => {
-      const [lng, lat] = cluster.geometry.coordinates;
-      const isCluster = cluster.properties.cluster;
-      const pointCount = cluster.properties.point_count;
+    // 비상벨 마커 (빨간색) - 줌 레벨 5 이하일 때만 표시
+    if (
+      emergencyBells &&
+      emergencyBells.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const bellMarkers = emergencyBells.map((bell) => (
+        <MapMarker
+          key={`bell-${bell.id}`}
+          position={{ lat: bell.latitude, lng: bell.longitude }}
+          title={`비상벨: ${bell.location || bell.category}`}
+          image={{
+            src: bellIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...bellMarkers);
+    }
 
-      // 클러스터 크기에 따른 스타일 (MarkerClusterer와 유사하게)
-      let size = 40;
-      let color = "rgba(245, 158, 11, 0.8)"; // 주황 (기본)
-
-      if (isCluster && pointCount) {
-        if (pointCount < 10) {
-          size = 30;
-          color = "rgba(59, 130, 246, 0.8)"; // 파랑
-        } else if (pointCount >= 50) {
-          size = 50;
-          color = "rgba(239, 68, 68, 0.8)"; // 빨강
-        }
-      }
-
-      if (isCluster) {
-        // 클러스터 마커
-        return (
-          <CustomOverlayMap
-            key={`cluster-${cluster.id}`}
-            position={{ lat, lng }}
-            zIndex={10}
-          >
-            <div
-              style={{
-                width: `${size}px`,
-                height: `${size}px`,
-                background: color,
-                borderRadius: "50%",
-                color: "#fff",
-                textAlign: "center",
-                lineHeight: `${size}px`,
-                fontWeight: "bold",
-                boxShadow: "0 2px 4px rgba(0,0,0,0.3)",
-                border: "2px solid white",
-                cursor: "pointer",
-              }}
-              onClick={() => {
-                // 클러스터 클릭 시 확대 (Supercluster의 getClusterExpansionZoom 사용 가능하지만 API 호출 필요)
-                // 여기서는 간단히 2단계 확대
-                if (mapInstance) {
-                  mapInstance.setLevel(mapInstance.getLevel() - 2);
-                  mapInstance.panTo(new kakao.maps.LatLng(lat, lng));
-                }
-              }}
-            >
-              {pointCount}
-            </div>
-          </CustomOverlayMap>
-        );
-      } else {
-        // 단일 마커 (타입별 아이콘 적용)
-        const type = cluster.properties.type;
-        let iconSrc = lightIcon;
-        let title = "보안등";
-
-        if (type === "bells") {
-          iconSrc = bellIcon;
-          title = "비상벨";
-        } else if (type === "cctv") {
-          iconSrc = cctvIcon;
-          title = "CCTV";
-        } else if (type === "safe_paths") {
-          iconSrc = footprintIcon;
-          title = "안심 귀갓길";
-        }
+    // CCTV 마커 (보라색) - 줌 레벨 5 이하일 때만 표시
+    if (
+      cctvs &&
+      cctvs.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const cctvMarkers = cctvs.map((cctv) => (
+        <MapMarker
+          key={`cctv-${cctv.id}`}
+          position={{ lat: cctv.latitude, lng: cctv.longitude }}
+          title={`CCTV: ${cctv.address || "위치 정보 없음"}`}
+          image={{
+            src: cctvIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...cctvMarkers);
+    }
 
     if (sosTargets && sosTargets.length > 0) {
       sosTargets
@@ -915,8 +797,69 @@ export default function BasicMap() {
 
           {/* none 모드일 때는 아무것도 렌더링하지 않음 */}
 
-          {/* 클러스터 모드 (서버 사이드 클러스터링) */}
-          {visualizationMode === "cluster" && <>{renderServerClusters()}</>}
+          {/* 클러스터 모드 (마커 모드 통합) */}
+          {visualizationMode === "cluster" &&
+            (securityLights.length > 0 ||
+              safeReturnPaths.length > 0 ||
+              emergencyBells.length > 0 ||
+              cctvs.length > 0) && (
+              <MarkerClusterer
+                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}-${emergencyBells.length}-${cctvs.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
+                averageCenter={true}
+                minLevel={1} // 줌 레벨 제한 해제 (모든 레벨에서 클러스터링 동작하되, 확대 시 마커가 보임)
+                // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수
+                calculator={(size) => {
+                  // 안심 귀갓길이 포함되면 가중치를 더 줄 수도 있지만,
+                  // 여기서는 단순 개수로 처리하거나 필요 시 로직 수정 가능
+                  // 기본 로직: 10개 미만 -> [0], 10~30 -> [1], 30~50 -> [2], 50 이상 -> [3]
+                  // 여기서는 styles 배열 길이에 맞춰 [0], [1], [2] 리턴
+                  if (size < 10) return [0];
+                  if (size < 50) return [1];
+                  return [2];
+                }}
+                // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
+                styles={[
+                  {
+                    // 1단계 (개수가 적을 때)
+                    width: "30px",
+                    height: "30px",
+                    background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "30px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(59, 130, 246, 1)",
+                  },
+                  {
+                    // 2단계 (개수가 중간일 때)
+                    width: "40px",
+                    height: "40px",
+                    background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "40px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(245, 158, 11, 1)",
+                  },
+                  {
+                    // 3단계 (개수가 많을 때)
+                    width: "50px",
+                    height: "50px",
+                    background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "50px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(239, 68, 68, 1)",
+                  },
+                ]}
+              >
+                {renderMarkers()}
+              </MarkerClusterer>
+            )}
 
           {/* 히트맵 모드 */}
           {visualizationMode === "heatmap" &&
@@ -1041,7 +984,7 @@ export default function BasicMap() {
                       currentPosition.lng
                     );
                     mapInstance.panTo(moveLatLon);
-                    mapInstance.setLevel(8);
+                    mapInstance.setLevel(6);
                   }
                 } else {
                   // 토글 해제 시 클러스터 인스턴스를 삭제(리셋)하기 위해 모드 변경
@@ -1081,41 +1024,6 @@ export default function BasicMap() {
               <Grid3x3 className="h-3 w-3 mr-1" />
               <span className="text-xs">히트맵</span>
             </Toggle>
-          </div>
-          {/* 범례 (Legend) */}
-          <div className="mt-2 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-2 shadow-lg space-y-2">
-            <div className="flex items-center gap-2">
-              <img
-                src="data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EAB308%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15%2014c.2-1%20.7-1.7%201.5-2.5%201-1%201.5-2%201.5-3.5A6%206%200%200%200%206%208c0%201%20.5%202%201.5%203.5.8.8%201.3%201.5%201.5%201.5%202.5%22%2F%3E%3Cpath%20d%3D%22M9%2018h6%22%2F%3E%3Cpath%20d%3D%22M10%2022h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E"
-                alt="보안등"
-                className="w-4 h-4"
-              />
-              <span className="text-xs font-medium">보안등</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <img
-                src="data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23A855F7%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%23A855F7%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M16.75%2012h3.632a1%201%200%200%201%20.894%201.447l-2.034%204.069a1%201%200%200%201-1.708.134l-2.124-2.97%22%2F%3E%3Cpath%20d%3D%22M17.106%209.053a1%201%200%200%201%20.447%201.341l-3.106%206.211a1%201%200%200%201-1.342.447L3.61%2012.3a2.92%202.92%200%200%201-1.3-3.91L3.69%205.6a2.92%202.92%200%200%201%203.92-1.3z%22%2F%3E%3Cpath%20d%3D%22M2%2019h3.76a2%202%200%200%200%201.8-1.1L9%2015%22%2F%3E%3Cpath%20d%3D%22M2%2021v-4%22%2F%3E%3Cpath%20d%3D%22M7%209h.01%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E"
-                alt="CCTV"
-                className="w-4 h-4"
-              />
-              <span className="text-xs font-medium">CCTV</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <img
-                src="data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EF4444%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208a6%206%200%200%201%2012%200c0%207%203%209%203%209H3s3-2%203-9%22%2F%3E%3Cpath%20d%3D%22M10.3%2021a1.94%201.94%200%200%200%203.4%200%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E"
-                alt="비상벨"
-                className="w-4 h-4"
-              />
-              <span className="text-xs font-medium">비상벨</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <img
-                src="data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%233B82F6%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M19%2014c1.49-1.46%203-3.21%203-5.5A5.5%205.5%200%200%200%2016.5%203c-1.76%200-3%20.5-4.5%202-1.5-1.5-2.74-2-4.5-2A5.5%205.5%200%200%200%202%208.5c0%202.3%201.5%204.05%203%205.5l7%207Z%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E"
-                alt="안심귀갓길"
-                className="w-4 h-4"
-              />
-              <span className="text-xs font-medium">안심귀갓길</span>
-            </div>
           </div>
         </div>
         {/* 지도 타입 전환 토글 */}
