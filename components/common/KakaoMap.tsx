@@ -13,7 +13,6 @@ import {
   Satellite,
   Layers,
   Grid3x3,
-  MapPinned,
 } from "lucide-react";
 import { useMapStore } from "@/store/mapStore";
 import { useUIStore } from "@/store/uiStore";
@@ -26,7 +25,7 @@ export default function BasicMap() {
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
   const [mapInstance, setMapInstance] = useState<kakao.maps.Map | null>(null);
   const [visualizationMode, setVisualizationMode] = useState<
-    "none" | "markers" | "cluster" | "heatmap"
+    "none" | "cluster" | "heatmap"
   >("none"); // 기본값은 none 유지
 
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
@@ -41,6 +40,13 @@ export default function BasicMap() {
     setShowDestinationOverlay,
     securityLights,
     setSecurityLights,
+    safeReturnPaths,
+    setSafeReturnPaths,
+    emergencyBells,
+    setEmergencyBells,
+    cctvs,
+    setCctvs,
+    setLevel,
   } = useMapStore();
   const { openModal } = useUIStore();
   const [loading, setLoading] = useState(true);
@@ -48,6 +54,9 @@ export default function BasicMap() {
 
   // 이전 요청 취소를 위한 AbortController (컴포넌트 최상위로 이동)
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pathAbortControllerRef = useRef<AbortController | null>(null); // 여성 안심 귀갓길용
+  const bellAbortControllerRef = useRef<AbortController | null>(null); // 비상벨용
+  const cctvAbortControllerRef = useRef<AbortController | null>(null); // CCTV용
   // 마지막 조회 영역 저장 (중복 요청 방지)
   const lastBoundsRef = useRef<{
     swLat: number;
@@ -113,12 +122,12 @@ export default function BasicMap() {
 
   // mapStore의 center가 변경될 때 지도 이동
   useEffect(() => {
-    const map = mapRef.current;
+    const map = mapInstance || mapRef.current;
     if (!map) return;
 
     const moveLatLon = new kakao.maps.LatLng(center.lat, center.lng);
     map.setCenter(moveLatLon);
-  }, [center]);
+  }, [center, mapInstance]); // mapInstance 의존성 추가
 
   // 지도 영역 변경 시 보안등 데이터 가져오기
   useEffect(() => {
@@ -181,7 +190,29 @@ export default function BasicMap() {
               );
               if (debugResponse.ok) {
                 const debugData = await debugResponse.json();
-                console.log("[지도] DB 전체 데이터 확인:", debugData);
+                console.log("[지도] 보안등 데이터 확인:", debugData);
+              }
+
+              const debugPathResponse = await fetch(
+                `/api/safe-return-paths?debug=true`
+              );
+              if (debugPathResponse.ok) {
+                const debugPathData = await debugPathResponse.json();
+                console.log("[지도] 안심 귀갓길 데이터 확인:", debugPathData);
+              }
+
+              const debugBellResponse = await fetch(
+                `/api/emergency-bells?debug=true`
+              );
+              if (debugBellResponse.ok) {
+                const debugBellData = await debugBellResponse.json();
+                console.log("[지도] 비상벨 데이터 확인:", debugBellData);
+              }
+
+              const debugCctvResponse = await fetch(`/api/cctv?debug=true`);
+              if (debugCctvResponse.ok) {
+                const debugCctvData = await debugCctvResponse.json();
+                console.log("[지도] CCTV 데이터 확인:", debugCctvData);
               }
             } catch (debugError) {
               console.error("[지도] 디버그 API 호출 실패:", debugError);
@@ -192,6 +223,42 @@ export default function BasicMap() {
         const response = await fetch(
           `/api/security-lights?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
           { signal: abortController.signal }
+        );
+
+        // 여성 안심 귀갓길 데이터 가져오기
+        if (pathAbortControllerRef.current) {
+          pathAbortControllerRef.current.abort();
+        }
+        const pathAbortController = new AbortController();
+        pathAbortControllerRef.current = pathAbortController;
+
+        // 비상벨 데이터 가져오기
+        if (bellAbortControllerRef.current) {
+          bellAbortControllerRef.current.abort();
+        }
+        const bellAbortController = new AbortController();
+        bellAbortControllerRef.current = bellAbortController;
+
+        // CCTV 데이터 가져오기
+        if (cctvAbortControllerRef.current) {
+          cctvAbortControllerRef.current.abort();
+        }
+        const cctvAbortController = new AbortController();
+        cctvAbortControllerRef.current = cctvAbortController;
+
+        const pathResponse = await fetch(
+          `/api/safe-return-paths?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: pathAbortController.signal }
+        );
+
+        const bellResponse = await fetch(
+          `/api/emergency-bells?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: bellAbortController.signal }
+        );
+
+        const cctvResponse = await fetch(
+          `/api/cctv?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: cctvAbortController.signal }
         );
 
         // 요청이 취소되었으면 처리하지 않음
@@ -219,12 +286,27 @@ export default function BasicMap() {
             setSecurityLights([]);
           }
         }
+
+        if (pathResponse.ok) {
+          const pathData = await pathResponse.json();
+          setSafeReturnPaths(pathData.paths || []);
+        }
+
+        if (bellResponse.ok) {
+          const bellData = await bellResponse.json();
+          setEmergencyBells(bellData.bells || []);
+        }
+
+        if (cctvResponse.ok) {
+          const cctvData = await cctvResponse.json();
+          setCctvs(cctvData.cctvs || []);
+        }
       } catch (error) {
         // AbortError는 무시 (의도적인 취소)
         if (error instanceof Error && error.name === "AbortError") {
           return;
         }
-        console.error("[지도] 보안등 데이터 가져오기 실패:", error);
+        console.error("[지도] 데이터 가져오기 실패:", error);
       }
     };
 
@@ -250,6 +332,9 @@ export default function BasicMap() {
       const bounds = map.getBounds();
       if (bounds) {
         fetchSecurityLights();
+        // 중복 등록 방지를 위해 기존 리스너 제거 시도 후 추가는 handleLoad에서 처리하지만
+        // 여기서는 바로 idle 리스너를 붙이는게 안전함
+        kakao.maps.event.removeListener(map, "idle", handleIdle);
         kakao.maps.event.addListener(map, "idle", handleIdle);
       } else {
         setTimeout(tryFetch, 500);
@@ -263,47 +348,143 @@ export default function BasicMap() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      if (pathAbortControllerRef.current) {
+        pathAbortControllerRef.current.abort();
+      }
+      if (bellAbortControllerRef.current) {
+        bellAbortControllerRef.current.abort();
+      }
+      if (cctvAbortControllerRef.current) {
+        cctvAbortControllerRef.current.abort();
+      }
       kakao.maps.event.removeListener(map, "tilesloaded", handleLoad);
       kakao.maps.event.removeListener(map, "idle", handleIdle);
     };
-  }, [setSecurityLights, loading, mapInstance]);
+  }, [
+    setSecurityLights,
+    setSafeReturnPaths,
+    setEmergencyBells,
+    setCctvs,
+    loading,
+    mapInstance,
+  ]);
 
   // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
   const renderMarkers = () => {
-    if (!securityLights || securityLights.length === 0) return null;
+    const markers = [];
 
-    return securityLights
-      .filter((light) => {
-        // 좌표 유효성 검사
-        return (
-          light.latitude &&
-          light.longitude &&
-          typeof light.latitude === "number" &&
-          typeof light.longitude === "number" &&
-          !isNaN(light.latitude) &&
-          !isNaN(light.longitude)
-        );
-      })
-      .map((light) => {
-        const title =
-          light.address_lot ||
-          `${light.si_do || ""} ${light.si_gun_gu || ""} ${
-            light.eup_myeon_dong || ""
-          }`.trim() ||
-          "보안등";
+    // 아이콘 SVG Data URI (원형 배경 포함)
+    const lightIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EAB308%22%20stroke%3D%22%23EAB308%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M15%2014c.2-1%20.7-1.7%201.5-2.5%201-1%201.5-2%201.5-3.5A6%206%200%200%200%206%208c0%201%20.5%202%201.5%203.5.8.8%201.3%201.5%201.5%202.5%22%2F%3E%3Cpath%20d%3D%22M9%2018h6%22%2F%3E%3Cpath%20d%3D%22M10%2022h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const footprintIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M2%209.5a5.5%205.5%200%200%201%209.591-3.676.56.56%200%200%200%20.818%200A5.49%205.49%200%200%201%2022%209.5c0%202.29-1.5%204-3%205.5l-5.492%205.313a2%202%200%200%201-3%20.019L5%2015c-1.5-1.5-3-3.2-3-5.5%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const bellIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EF4444%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208a6%206%200%200%201%2012%200c0%207%203%209%203%209H3s3-2%203-9%22%2F%3E%3Cpath%20d%3D%22M10.3%2021a1.94%201.94%200%200%200%203.4%200%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const cctvIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M16.75%2012h3.632a1%201%200%200%201%20.894%201.447l-2.034%204.069a1%201%200%200%201-1.708.134l-2.124-2.97%22%2F%3E%3Cpath%20d%3D%22M17.106%209.053a1%201%200%200%201%20.447%201.341l-3.106%206.211a1%201%200%200%201-1.342.447L3.61%2012.3a2.92%202.92%200%200%201-1.3-3.91L3.69%205.6a2.92%202.92%200%200%201%203.92-1.3z%22%2F%3E%3Cpath%20d%3D%22M2%2019h3.76a2%202%200%200%200%201.8-1.1L9%2015%22%2F%3E%3Cpath%20d%3D%22M2%2021v-4%22%2F%3E%3Cpath%20d%3D%22M7%209h.01%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
 
-        return (
-          <MapMarker
-            key={light.id}
-            position={{ lat: light.latitude, lng: light.longitude }}
-            title={title}
-            image={{
-              src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
-              size: { width: 24, height: 35 },
-            }}
-          />
-        );
-      });
+    // 보안등 마커
+    if (securityLights && securityLights.length > 0) {
+      const lightMarkers = securityLights
+        .filter((light) => {
+          // 좌표 유효성 검사
+          return (
+            light.latitude &&
+            light.longitude &&
+            typeof light.latitude === "number" &&
+            typeof light.longitude === "number" &&
+            !isNaN(light.latitude) &&
+            !isNaN(light.longitude)
+          );
+        })
+        .map((light) => {
+          const title =
+            light.address_lot ||
+            `${light.si_do || ""} ${light.si_gun_gu || ""} ${
+              light.eup_myeon_dong || ""
+            }`.trim() ||
+            "보안등";
+
+          return (
+            <MapMarker
+              key={`light-${light.id}`}
+              position={{ lat: light.latitude, lng: light.longitude }}
+              title={title || ""}
+              image={{
+                src: lightIcon,
+                size: { width: 32, height: 32 },
+              }}
+            />
+          );
+        });
+      markers.push(...lightMarkers);
+    }
+
+    // 안심 귀갓길 마커 (파란색) - 줌 레벨 5 이하일 때만 표시 (더 확대되었을 때)
+    // 카카오맵은 레벨이 낮을수록 확대된 상태임 (1: 가장 확대 ~ 14: 가장 축소)
+    if (
+      safeReturnPaths &&
+      safeReturnPaths.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const pathMarkers = safeReturnPaths.map((path) => (
+        <MapMarker
+          key={`path-${path.id}`}
+          position={{ lat: path.start_latitude, lng: path.start_longitude }}
+          title={`안심 귀갓길: ${path.start_address} ~ ${path.end_address}`}
+          image={{
+            src: footprintIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...pathMarkers);
+    }
+
+    // 비상벨 마커 (빨간색) - 줌 레벨 5 이하일 때만 표시
+    if (
+      emergencyBells &&
+      emergencyBells.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const bellMarkers = emergencyBells.map((bell) => (
+        <MapMarker
+          key={`bell-${bell.id}`}
+          position={{ lat: bell.latitude, lng: bell.longitude }}
+          title={`비상벨: ${bell.location || bell.category}`}
+          image={{
+            src: bellIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...bellMarkers);
+    }
+
+    // CCTV 마커 (보라색) - 줌 레벨 5 이하일 때만 표시
+    if (
+      cctvs &&
+      cctvs.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const cctvMarkers = cctvs.map((cctv) => (
+        <MapMarker
+          key={`cctv-${cctv.id}`}
+          position={{ lat: cctv.latitude, lng: cctv.longitude }}
+          title={`CCTV: ${cctv.address || "위치 정보 없음"}`}
+          image={{
+            src: cctvIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...cctvMarkers);
+    }
+
+    return markers;
   };
 
   if (loading) {
@@ -336,12 +517,12 @@ export default function BasicMap() {
             console.log("[지도] onCreate 콜백 호출됨, 지도 인스턴스 받음");
             setMapInstance(map);
           }}
-          onCenterChanged={(map) => {
-            const centerPos = map.getCenter();
+          onZoomChanged={(map) => {
             setCenter({
-              lat: centerPos.getLat(),
-              lng: centerPos.getLng(),
+              lat: map.getCenter().getLat(),
+              lng: map.getCenter().getLng(),
             });
+            setLevel(map.getLevel());
           }}
         >
           {!!currentPosition && (
@@ -372,63 +553,83 @@ export default function BasicMap() {
 
           {/* none 모드일 때는 아무것도 렌더링하지 않음 */}
 
-          {/* 클러스터 모드 */}
-          {visualizationMode === "cluster" && (
-            <MarkerClusterer
-              averageCenter={true}
-              minLevel={6}
-              // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수 (기본값 사용해도 됨)
-              // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
-              styles={[
-                {
-                  // 1단계 (개수가 적을 때)
-                  width: "30px",
-                  height: "30px",
-                  background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "30px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(59, 130, 246, 1)",
-                },
-                {
-                  // 2단계 (개수가 중간일 때)
-                  width: "40px",
-                  height: "40px",
-                  background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "40px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(245, 158, 11, 1)",
-                },
-                {
-                  // 3단계 (개수가 많을 때)
-                  width: "50px",
-                  height: "50px",
-                  background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
-                  borderRadius: "50%",
-                  color: "#fff",
-                  textAlign: "center",
-                  lineHeight: "50px",
-                  fontWeight: "bold",
-                  border: "1px solid rgba(239, 68, 68, 1)",
-                },
-              ]}
-            >
-              {renderMarkers()}
-            </MarkerClusterer>
-          )}
-
-          {/* 마커 모드 */}
-          {visualizationMode === "markers" && renderMarkers()}
+          {/* 클러스터 모드 (마커 모드 통합) */}
+          {visualizationMode === "cluster" &&
+            (securityLights.length > 0 ||
+              safeReturnPaths.length > 0 ||
+              emergencyBells.length > 0 ||
+              cctvs.length > 0) && (
+              <MarkerClusterer
+                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}-${emergencyBells.length}-${cctvs.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
+                averageCenter={true}
+                minLevel={1} // 줌 레벨 제한 해제 (모든 레벨에서 클러스터링 동작하되, 확대 시 마커가 보임)
+                // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수
+                calculator={(size) => {
+                  // 안심 귀갓길이 포함되면 가중치를 더 줄 수도 있지만,
+                  // 여기서는 단순 개수로 처리하거나 필요 시 로직 수정 가능
+                  // 기본 로직: 10개 미만 -> [0], 10~30 -> [1], 30~50 -> [2], 50 이상 -> [3]
+                  // 여기서는 styles 배열 길이에 맞춰 [0], [1], [2] 리턴
+                  if (size < 10) return [0];
+                  if (size < 50) return [1];
+                  return [2];
+                }}
+                // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
+                styles={[
+                  {
+                    // 1단계 (개수가 적을 때)
+                    width: "30px",
+                    height: "30px",
+                    background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "30px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(59, 130, 246, 1)",
+                  },
+                  {
+                    // 2단계 (개수가 중간일 때)
+                    width: "40px",
+                    height: "40px",
+                    background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "40px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(245, 158, 11, 1)",
+                  },
+                  {
+                    // 3단계 (개수가 많을 때)
+                    width: "50px",
+                    height: "50px",
+                    background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
+                    borderRadius: "50%",
+                    color: "#fff",
+                    textAlign: "center",
+                    lineHeight: "50px",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(239, 68, 68, 1)",
+                  },
+                ]}
+              >
+                {renderMarkers()}
+              </MarkerClusterer>
+            )}
 
           {/* 히트맵 모드 */}
-          {visualizationMode === "heatmap" && securityLights.length > 0 && (
-            <HeatmapLayer data={securityLights} />
-          )}
+          {visualizationMode === "heatmap" &&
+            (securityLights.length > 0 ||
+              safeReturnPaths.length > 0 ||
+              emergencyBells.length > 0 ||
+              cctvs.length > 0) && (
+              <HeatmapLayer
+                data={securityLights}
+                safeReturnPaths={safeReturnPaths}
+                emergencyBells={emergencyBells}
+                cctvs={cctvs}
+              />
+            )}
 
           {/* 4. 검색한 목적지 마커 */}
           {destinationInfo && (
@@ -487,7 +688,17 @@ export default function BasicMap() {
             <Toggle
               pressed={visualizationMode === "none"}
               onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("none");
+                if (pressed) {
+                  setVisualizationMode("none");
+                  if (mapInstance && currentPosition) {
+                    const moveLatLon = new kakao.maps.LatLng(
+                      currentPosition.lat,
+                      currentPosition.lng
+                    );
+                    mapInstance.panTo(moveLatLon);
+                    mapInstance.setLevel(3); // 지도만 볼 때는 더 자세히 (3레벨)
+                  }
+                }
               }}
               variant="outline"
               size="sm"
@@ -498,22 +709,22 @@ export default function BasicMap() {
               <span className="text-xs">지도만</span>
             </Toggle>
             <Toggle
-              pressed={visualizationMode === "markers"}
-              onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("markers");
-              }}
-              variant="outline"
-              size="sm"
-              className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground w-full justify-start"
-              aria-label="마커 모드"
-            >
-              <MapPinned className="h-3 w-3 mr-1" />
-              <span className="text-xs">마커</span>
-            </Toggle>
-            <Toggle
               pressed={visualizationMode === "cluster"}
               onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("cluster");
+                if (pressed) {
+                  setVisualizationMode("cluster");
+                  if (mapInstance && currentPosition) {
+                    const moveLatLon = new kakao.maps.LatLng(
+                      currentPosition.lat,
+                      currentPosition.lng
+                    );
+                    mapInstance.panTo(moveLatLon);
+                    mapInstance.setLevel(6);
+                  }
+                } else {
+                  // 토글 해제 시 클러스터 인스턴스를 삭제(리셋)하기 위해 모드 변경
+                  setVisualizationMode("none");
+                }
               }}
               variant="outline"
               size="sm"
@@ -526,7 +737,19 @@ export default function BasicMap() {
             <Toggle
               pressed={visualizationMode === "heatmap"}
               onPressedChange={(pressed) => {
-                if (pressed) setVisualizationMode("heatmap");
+                if (pressed) {
+                  setVisualizationMode("heatmap");
+                  if (mapInstance && currentPosition) {
+                    const moveLatLon = new kakao.maps.LatLng(
+                      currentPosition.lat,
+                      currentPosition.lng
+                    );
+                    mapInstance.panTo(moveLatLon);
+                    mapInstance.setLevel(3); // 히트맵도 자세히 보기 위해 레벨 3으로 변경
+                  }
+                } else {
+                  setVisualizationMode("none");
+                }
               }}
               variant="outline"
               size="sm"

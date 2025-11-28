@@ -9,6 +9,7 @@ import {
   Trash2,
   ChevronRight,
   User,
+  ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -121,6 +122,7 @@ export default function MyPagePage() {
   const handleEmergencySettings = () =>
     router.push("/myPage/emergency-contacts");
   const handleReportHistory = () => router.push("/myPage/reports");
+  const handleGuardians = () => router.push("/myPage/guardians");
 
   const handleDeleteAccount = async () => {
     if (!user) {
@@ -262,6 +264,26 @@ export default function MyPagePage() {
                   </h3>
                   <p className="text-sm text-muted-foreground">
                     내 신고 내역 확인
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="h-5 w-5 text-muted-foreground" />
+            </div>
+          </Card>
+
+          <Card
+            className="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+            onClick={handleGuardians}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <ShieldCheck className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-foreground">보호자 관리</h3>
+                  <p className="text-sm text-muted-foreground">
+                    실시간 위치 공유 대상 설정
                   </p>
                 </div>
               </div>

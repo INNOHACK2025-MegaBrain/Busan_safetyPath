@@ -107,7 +107,7 @@ export default function SearchSheet() {
       // 카카오맵 Places API 사용
       const ps = new kakao.maps.services.Places();
 
-      ps.keywordSearch(query, (data, status) => {
+      ps.keywordSearch(query, async (data, status) => {
         setIsSearching(false);
 
         if (status === kakao.maps.services.Status.OK) {
@@ -137,7 +137,27 @@ export default function SearchSheet() {
 
           setResults(places);
         } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
-          setResults([]);
+          // 키워드 검색 결과가 없으면 주소 검색 시도
+          try {
+            const geocoder = new kakao.maps.services.Geocoder();
+            geocoder.addressSearch(query, (result, addrStatus) => {
+              if (addrStatus === kakao.maps.services.Status.OK) {
+                const addressPlaces: PlaceResult[] = result.map((addr: any) => ({
+                  place_name: addr.address_name, // 주소 자체를 장소명으로 사용
+                  address_name: addr.address_name,
+                  road_address_name: addr.road_address?.address_name || "",
+                  x: addr.x,
+                  y: addr.y,
+                }));
+                setResults(addressPlaces);
+              } else {
+                setResults([]);
+              }
+            });
+          } catch (addrError) {
+            console.error("주소 검색 중 오류:", addrError);
+            setResults([]);
+          }
         } else {
           console.error("검색 실패:", status);
           setResults([]);

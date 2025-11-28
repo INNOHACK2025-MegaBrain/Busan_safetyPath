@@ -31,6 +31,29 @@ interface MapStore {
     eup_myeon_dong?: string;
     address_lot?: string;
   }>; // 보안등 정보
+  safeReturnPaths: Array<{
+    id: string;
+    start_latitude: number;
+    start_longitude: number;
+    end_latitude: number;
+    end_longitude: number;
+    start_address: string;
+    end_address: string;
+    district: string;
+  }>; // 여성 안심 귀갓길 정보
+  emergencyBells: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    location?: string;
+    category?: string;
+  }>; // 비상벨 정보
+  cctvs: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    address?: string;
+  }>; // CCTV 정보
   weights: {
     cctv: number;
     crime: number;
@@ -46,6 +69,9 @@ interface MapStore {
   setRoutePath: (path: Coord[] | null) => void;
   setShowDestinationOverlay: (show: boolean) => void;
   setSecurityLights: (lights: MapStore["securityLights"]) => void;
+  setSafeReturnPaths: (paths: MapStore["safeReturnPaths"]) => void;
+  setEmergencyBells: (bells: MapStore["emergencyBells"]) => void;
+  setCctvs: (cctvs: MapStore["cctvs"]) => void;
   setWeight: (key: keyof MapStore["weights"], value: number) => void;
   resetSelectedPoints: () => void;
 }
@@ -58,6 +84,9 @@ export const useMapStore = create<MapStore>((set) => ({
   routePath: null,
   showDestinationOverlay: false,
   securityLights: [],
+  safeReturnPaths: [],
+  emergencyBells: [],
+  cctvs: [],
   weights: {
     cctv: 1,
     crime: 1,
@@ -84,6 +113,11 @@ export const useMapStore = create<MapStore>((set) => ({
   setShowDestinationOverlay: (show) => set({ showDestinationOverlay: show }),
   setSecurityLights: (lights: MapStore["securityLights"]) =>
     set({ securityLights: lights }),
+  setSafeReturnPaths: (paths: MapStore["safeReturnPaths"]) =>
+    set({ safeReturnPaths: paths }),
+  setEmergencyBells: (bells: MapStore["emergencyBells"]) =>
+    set({ emergencyBells: bells }),
+  setCctvs: (cctvs: MapStore["cctvs"]) => set({ cctvs }),
 
   setWeight: (key, value) =>
     set((state) => ({
