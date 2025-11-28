@@ -1,6 +1,6 @@
 "use client";
 import { useEffect } from "react";
-import BasicMap from "@/components/common/KakaoMap";
+import dynamic from "next/dynamic";
 import Header from "@/components/layout/header";
 import Menu from "@/components/layout/menu";
 import FloatingMenuButton from "@/components/layout/FloatingMenuButton";
@@ -11,6 +11,15 @@ import ReportSheet from "@/components/layout/ReportSheet";
 import AuthModal from "@/components/auth/AuthModal";
 import { useUserStore } from "@/store/userStore";
 import { supabase } from "@/lib/supabase";
+
+const BasicMap = dynamic(() => import("@/components/common/KakaoMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-gray-100 text-muted-foreground">
+      지도를 불러오는 중...
+    </div>
+  ),
+});
 
 export type Screen = "home" | "riskMap" | "sos" | "mypage";
 
