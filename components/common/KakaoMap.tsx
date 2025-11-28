@@ -4,8 +4,17 @@ import { Map, Polyline, CustomOverlayMap } from "react-kakao-maps-sdk";
 import useKakaoLoader from "@/hooks/useKakaoLoader";
 import { useRef, useState, useEffect, useMemo } from "react";
 import AddMapCustomControlStyle from "./addMapCustomControl.style";
-import { MapMarker } from "react-kakao-maps-sdk";
-import { Navigation, MapPin, X, Map as MapIcon, Satellite } from "lucide-react";
+import { MapMarker, MarkerClusterer } from "react-kakao-maps-sdk";
+import {
+  Navigation,
+  MapPin,
+  X,
+  Map as MapIcon,
+  Satellite,
+  Layers,
+  Grid3x3,
+  MapPinned,
+} from "lucide-react";
 import { useMapStore } from "@/store/mapStore";
 import { useUIStore } from "@/store/uiStore";
 import { Toggle } from "@/components/ui/toggle";
@@ -15,6 +24,9 @@ export default function BasicMap() {
   const mapRef = useRef<kakao.maps.Map>(null);
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
   const [mapInstance, setMapInstance] = useState<kakao.maps.Map | null>(null);
+  const [visualizationMode, setVisualizationMode] = useState<
+    "none" | "markers" | "cluster" | "heatmap"
+  >("none"); // 기본값은 none 유지
 
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
   const {
@@ -255,6 +267,144 @@ export default function BasicMap() {
     };
   }, [setSecurityLights, loading, mapInstance]);
 
+  // 보안등 밀도 계산 및 Zone 오버레이
+  useEffect(() => {
+    const map = mapInstance || mapRef.current;
+    if (!map || !securityLights || securityLights.length === 0) {
+      return;
+    }
+
+    // 그리드 기반 밀도 계산
+    const calculateDensity = () => {
+      const bounds = map.getBounds();
+      if (!bounds) return;
+
+      const swLatLng = bounds.getSouthWest();
+      const neLatLng = bounds.getNorthEast();
+      const gridSize = 20; // 20x20 그리드
+      const latStep = (neLatLng.getLat() - swLatLng.getLat()) / gridSize;
+      const lngStep = (neLatLng.getLng() - swLatLng.getLng()) / gridSize;
+
+      const grid: Array<{
+        sw: { lat: number; lng: number };
+        ne: { lat: number; lng: number };
+        count: number;
+      }> = [];
+
+      // 각 그리드 셀에 보안등 개수 계산
+      for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+          const swLat = swLatLng.getLat() + i * latStep;
+          const swLng = swLatLng.getLng() + j * lngStep;
+          const neLat = swLat + latStep;
+          const neLng = swLng + lngStep;
+
+          const count = securityLights.filter(
+            (light) =>
+              light.latitude >= swLat &&
+              light.latitude < neLat &&
+              light.longitude >= swLng &&
+              light.longitude < neLng
+          ).length;
+
+          grid.push({
+            sw: { lat: swLat, lng: swLng },
+            ne: { lat: neLat, lng: neLng },
+            count,
+          });
+        }
+      }
+
+      return grid;
+    };
+
+    const grid = calculateDensity();
+    if (!grid) return;
+
+    // 오버레이 생성
+    const overlays: kakao.maps.CustomOverlay[] = [];
+
+    grid.forEach((cell) => {
+      if (cell.count === 0) return; // 보안등이 없는 셀은 표시하지 않음
+
+      // 밀도에 따라 색상 결정
+      const maxCount = Math.max(...grid.map((g) => g.count));
+      const density = cell.count / maxCount;
+
+      // Green Zone: 밀도 높음, Grey Zone: 밀도 낮음
+      const color =
+        density > 0.5
+          ? `rgba(34, 197, 94, ${density * 0.3})` // Green Zone
+          : `rgba(107, 114, 128, ${density * 0.2})`; // Grey Zone
+
+      const overlay = new kakao.maps.CustomOverlay({
+        content: `<div style="width:100%;height:100%;background:${color};"></div>`,
+        position: new kakao.maps.LatLng(
+          (cell.sw.lat + cell.ne.lat) / 2,
+          (cell.sw.lng + cell.ne.lng) / 2
+        ),
+        xAnchor: 0.5,
+        yAnchor: 0.5,
+      });
+
+      // 사각형 영역을 표시하기 위해 커스텀 오버레이 사용
+      const rect = new kakao.maps.Rectangle({
+        bounds: new kakao.maps.LatLngBounds(
+          new kakao.maps.LatLng(cell.sw.lat, cell.sw.lng),
+          new kakao.maps.LatLng(cell.ne.lat, cell.ne.lng)
+        ),
+        fillColor: color,
+        fillOpacity: 0.3,
+        strokeWeight: 0,
+      });
+
+      rect.setMap(map);
+      overlays.push(overlay);
+    });
+
+    return () => {
+      overlays.forEach((overlay) => overlay.setMap(null));
+    };
+  }, [mapInstance, securityLights]);
+
+  // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
+  const renderMarkers = () => {
+    if (!securityLights || securityLights.length === 0) return null;
+
+    return securityLights
+      .filter((light) => {
+        // 좌표 유효성 검사
+        return (
+          light.latitude &&
+          light.longitude &&
+          typeof light.latitude === "number" &&
+          typeof light.longitude === "number" &&
+          !isNaN(light.latitude) &&
+          !isNaN(light.longitude)
+        );
+      })
+      .map((light) => {
+        const title =
+          light.address_lot ||
+          `${light.si_do || ""} ${light.si_gun_gu || ""} ${
+            light.eup_myeon_dong || ""
+          }`.trim() ||
+          "보안등";
+
+        return (
+          <MapMarker
+            key={light.id}
+            position={{ lat: light.latitude, lng: light.longitude }}
+            title={title}
+            image={{
+              src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
+              size: { width: 24, height: 35 },
+            }}
+          />
+        );
+      });
+  };
+
   if (loading) {
     return (
       <div className="w-full h-[350px] flex items-center justify-center bg-gray-100">
@@ -317,47 +467,21 @@ export default function BasicMap() {
             />
           )}
 
-          {/* 5. 보안등 마커 */}
-          {securityLights && securityLights.length > 0 && (
-            <>
-              {securityLights.map((light) => {
-                // 좌표 유효성 검사
-                if (
-                  !light.latitude ||
-                  !light.longitude ||
-                  typeof light.latitude !== "number" ||
-                  typeof light.longitude !== "number" ||
-                  isNaN(light.latitude) ||
-                  isNaN(light.longitude)
-                ) {
-                  return null;
-                }
+          {/* 4. [JSX 조건부 렌더링] - 마커와 클러스터는 여기서 처리 */}
 
-                // 보안등 위치 정보로 타이틀 생성
-                const title =
-                  light.address_lot ||
-                  `${light.si_do || ""} ${light.si_gun_gu || ""} ${
-                    light.eup_myeon_dong || ""
-                  }`.trim() ||
-                  "보안등";
+          {/* none 모드일 때는 아무것도 렌더링하지 않음 */}
 
-                return (
-                  <MapMarker
-                    key={light.id}
-                    position={{ lat: light.latitude, lng: light.longitude }}
-                    image={{
-                      src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
-                      size: {
-                        width: 24,
-                        height: 35,
-                      },
-                    }}
-                    title={title}
-                  />
-                );
-              })}
-            </>
+          {/* 클러스터 모드 */}
+          {visualizationMode === "cluster" && (
+            <MarkerClusterer averageCenter={true} minLevel={6}>
+              {renderMarkers()}
+            </MarkerClusterer>
           )}
+
+          {/* 마커 모드 */}
+          {visualizationMode === "markers" && renderMarkers()}
+
+          {/* 히트맵 모드일 때는 useEffect에서 사각형을 그렸으므로 여기서는 아무것도 안 함 */}
 
           {/* 4. 검색한 목적지 마커 */}
           {destinationInfo && (
@@ -410,6 +534,63 @@ export default function BasicMap() {
             </>
           )}
         </Map>
+        {/* 시각화 모드 전환 토글 */}
+        <div className="absolute top-4 left-4 z-10">
+          <div className="flex flex-col gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
+            <Toggle
+              pressed={visualizationMode === "none"}
+              onPressedChange={(pressed) => {
+                if (pressed) setVisualizationMode("none");
+              }}
+              variant="outline"
+              size="sm"
+              className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground w-full justify-start"
+              aria-label="지도만 보기"
+            >
+              <MapIcon className="h-3 w-3 mr-1" />
+              <span className="text-xs">지도만</span>
+            </Toggle>
+            <Toggle
+              pressed={visualizationMode === "markers"}
+              onPressedChange={(pressed) => {
+                if (pressed) setVisualizationMode("markers");
+              }}
+              variant="outline"
+              size="sm"
+              className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground w-full justify-start"
+              aria-label="마커 모드"
+            >
+              <MapPinned className="h-3 w-3 mr-1" />
+              <span className="text-xs">마커</span>
+            </Toggle>
+            <Toggle
+              pressed={visualizationMode === "cluster"}
+              onPressedChange={(pressed) => {
+                if (pressed) setVisualizationMode("cluster");
+              }}
+              variant="outline"
+              size="sm"
+              className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground w-full justify-start"
+              aria-label="클러스터 모드"
+            >
+              <Layers className="h-3 w-3 mr-1" />
+              <span className="text-xs">클러스터</span>
+            </Toggle>
+            <Toggle
+              pressed={visualizationMode === "heatmap"}
+              onPressedChange={(pressed) => {
+                if (pressed) setVisualizationMode("heatmap");
+              }}
+              variant="outline"
+              size="sm"
+              className="data-[state=on]:bg-primary data-[state=on]:text-primary-foreground w-full justify-start"
+              aria-label="히트맵 모드"
+            >
+              <Grid3x3 className="h-3 w-3 mr-1" />
+              <span className="text-xs">히트맵</span>
+            </Toggle>
+          </div>
+        </div>
         {/* 지도 타입 전환 토글 */}
         <div className="absolute top-4 right-4 z-10">
           <div className="flex items-center gap-1 bg-background/80 backdrop-blur-sm border border-border rounded-lg p-1 shadow-lg">
