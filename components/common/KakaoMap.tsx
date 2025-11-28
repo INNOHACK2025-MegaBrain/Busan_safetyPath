@@ -14,6 +14,7 @@ export default function BasicMap() {
   useKakaoLoader();
   const mapRef = useRef<kakao.maps.Map>(null);
   const [mapType, setMapType] = useState<"roadmap" | "skyview">("roadmap");
+  const [mapInstance, setMapInstance] = useState<kakao.maps.Map | null>(null);
 
   // mapStore에서 center와 destinationInfo, routePath, currentPosition 가져오기
   const {
@@ -25,9 +26,22 @@ export default function BasicMap() {
     setCurrentPosition,
     showDestinationOverlay,
     setShowDestinationOverlay,
+    securityLights,
+    setSecurityLights,
   } = useMapStore();
   const { openModal } = useUIStore();
   const [loading, setLoading] = useState(true);
+  const hasCheckedDebug = useRef(false);
+
+  // 이전 요청 취소를 위한 AbortController (컴포넌트 최상위로 이동)
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // 마지막 조회 영역 저장 (중복 요청 방지)
+  const lastBoundsRef = useRef<{
+    swLat: number;
+    swLng: number;
+    neLat: number;
+    neLng: number;
+  } | null>(null);
 
   // 1. 경로 생성: routePath가 있을 때만 경로 표시
   const path = useMemo(() => {
@@ -93,6 +107,154 @@ export default function BasicMap() {
     map.setCenter(moveLatLon);
   }, [center]);
 
+  // 지도 영역 변경 시 보안등 데이터 가져오기
+  useEffect(() => {
+    const map = mapInstance || mapRef.current;
+    if (!map || loading) {
+      return;
+    }
+
+    // useEffect 내부에서는 useRef를 호출하지 않고, 이미 선언된 ref 사용
+    const fetchSecurityLights = async () => {
+      try {
+        const bounds = map.getBounds();
+        if (!bounds) {
+          return;
+        }
+
+        const swLatLng = bounds.getSouthWest();
+        const neLatLng = bounds.getNorthEast();
+        const swLat = swLatLng.getLat();
+        const swLng = swLatLng.getLng();
+        const neLat = neLatLng.getLat();
+        const neLng = neLatLng.getLng();
+
+        // 이전 조회 영역과 비교
+        const lastBounds = lastBoundsRef.current;
+        if (lastBounds) {
+          const latDiff =
+            Math.abs(neLat - lastBounds.neLat) +
+            Math.abs(swLat - lastBounds.swLat);
+          const lngDiff =
+            Math.abs(neLng - lastBounds.neLng) +
+            Math.abs(swLng - lastBounds.swLng);
+
+          // 영역이 크게 변하지 않았으면 요청하지 않음 (0.01도 = 약 1km)
+          if (latDiff < 0.01 && lngDiff < 0.01) {
+            console.log("[지도] 영역 변경이 작아서 요청 생략");
+            return;
+          }
+        }
+
+        // 이전 요청이 있으면 취소
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
+
+        // 새로운 AbortController 생성
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
+
+        // 조회 영역 저장
+        lastBoundsRef.current = { swLat, swLng, neLat, neLng };
+
+        // 디버그 모드로 전체 데이터 확인 (첫 로드 시에만)
+        if (!hasCheckedDebug.current) {
+          hasCheckedDebug.current = true;
+          if (process.env.NODE_ENV === "development") {
+            try {
+              const debugResponse = await fetch(
+                `/api/security-lights?debug=true`
+              );
+              if (debugResponse.ok) {
+                const debugData = await debugResponse.json();
+                console.log("[지도] DB 전체 데이터 확인:", debugData);
+              }
+            } catch (debugError) {
+              console.error("[지도] 디버그 API 호출 실패:", debugError);
+            }
+          }
+        }
+
+        const response = await fetch(
+          `/api/security-lights?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: abortController.signal }
+        );
+
+        // 요청이 취소되었으면 처리하지 않음
+        if (abortController.signal.aborted) {
+          return;
+        }
+
+        if (response.ok) {
+          const data = await response.json();
+          const lights = data.securityLights || [];
+
+          if (lights.length > 0) {
+            // 좌표 유효성 검사
+            const validLights = lights.filter(
+              (light: { latitude?: number; longitude?: number }) =>
+                light.latitude &&
+                light.longitude &&
+                typeof light.latitude === "number" &&
+                typeof light.longitude === "number" &&
+                !isNaN(light.latitude) &&
+                !isNaN(light.longitude)
+            );
+            setSecurityLights(validLights);
+          } else {
+            setSecurityLights([]);
+          }
+        }
+      } catch (error) {
+        // AbortError는 무시 (의도적인 취소)
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        console.error("[지도] 보안등 데이터 가져오기 실패:", error);
+      }
+    };
+
+    // 지도 이동 완료 시 보안등 데이터 가져오기 (idle 이벤트는 이미 debounce됨)
+    const handleIdle = () => {
+      fetchSecurityLights();
+    };
+
+    // 지도 로드 완료 후 이벤트 리스너 추가
+    const handleLoad = () => {
+      const bounds = map.getBounds();
+      if (bounds) {
+        kakao.maps.event.addListener(map, "idle", handleIdle);
+        // 초기 로드 시 한 번 실행
+        fetchSecurityLights();
+      }
+    };
+
+    kakao.maps.event.addListener(map, "tilesloaded", handleLoad);
+
+    // 지도가 이미 로드된 경우를 대비해 직접 호출 시도
+    const tryFetch = () => {
+      const bounds = map.getBounds();
+      if (bounds) {
+        fetchSecurityLights();
+        kakao.maps.event.addListener(map, "idle", handleIdle);
+      } else {
+        setTimeout(tryFetch, 500);
+      }
+    };
+
+    setTimeout(tryFetch, 100);
+
+    return () => {
+      // cleanup 시 진행 중인 요청 취소
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      kakao.maps.event.removeListener(map, "tilesloaded", handleLoad);
+      kakao.maps.event.removeListener(map, "idle", handleIdle);
+    };
+  }, [setSecurityLights, loading, mapInstance]);
+
   if (loading) {
     return (
       <div className="w-full h-[350px] flex items-center justify-center bg-gray-100">
@@ -119,6 +281,10 @@ export default function BasicMap() {
           level={3}
           mapTypeId={mapType === "roadmap" ? "ROADMAP" : "HYBRID"}
           ref={mapRef}
+          onCreate={(map) => {
+            console.log("[지도] onCreate 콜백 호출됨, 지도 인스턴스 받음");
+            setMapInstance(map);
+          }}
           onCenterChanged={(map) => {
             const centerPos = map.getCenter();
             setCenter({
@@ -149,6 +315,48 @@ export default function BasicMap() {
               strokeStyle={"solid"}
               endArrow={true}
             />
+          )}
+
+          {/* 5. 보안등 마커 */}
+          {securityLights && securityLights.length > 0 && (
+            <>
+              {securityLights.map((light) => {
+                // 좌표 유효성 검사
+                if (
+                  !light.latitude ||
+                  !light.longitude ||
+                  typeof light.latitude !== "number" ||
+                  typeof light.longitude !== "number" ||
+                  isNaN(light.latitude) ||
+                  isNaN(light.longitude)
+                ) {
+                  return null;
+                }
+
+                // 보안등 위치 정보로 타이틀 생성
+                const title =
+                  light.address_lot ||
+                  `${light.si_do || ""} ${light.si_gun_gu || ""} ${
+                    light.eup_myeon_dong || ""
+                  }`.trim() ||
+                  "보안등";
+
+                return (
+                  <MapMarker
+                    key={light.id}
+                    position={{ lat: light.latitude, lng: light.longitude }}
+                    image={{
+                      src: "https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png",
+                      size: {
+                        width: 24,
+                        height: 35,
+                      },
+                    }}
+                    title={title}
+                  />
+                );
+              })}
+            </>
           )}
 
           {/* 4. 검색한 목적지 마커 */}

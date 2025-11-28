@@ -7,9 +7,10 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 // PUT: 연락처 수정
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
     
     // Authorization 헤더에서 토큰 가져오기
@@ -45,13 +46,6 @@ export async function PUT(
       user = cookieUser;
     }
 
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "인증에 실패했습니다." },
-        { status: 401 }
-      );
-    }
-
     const body = await request.json();
     const { name, phone, priority, relation } = body;
 
@@ -66,7 +60,7 @@ export async function PUT(
     const { data: existingContact, error: fetchError } = await supabase
       .from("emergency_contacts")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", id)
       .eq("user_id", user.id)
       .single();
 
@@ -83,7 +77,7 @@ export async function PUT(
         .from("emergency_contacts")
         .select("id, priority")
         .eq("user_id", user.id)
-        .neq("id", params.id);
+        .neq("id", id);
 
       const conflictingContact = allContacts?.find(
         (c) => c.priority === priority
@@ -105,7 +99,7 @@ export async function PUT(
             .eq("user_id", user.id)
             .gte("priority", priority)
             .lt("priority", existingContact.priority)
-            .neq("id", params.id);
+            .neq("id", id);
 
           if (contactsToUpdate) {
             for (const contact of contactsToUpdate) {
@@ -123,7 +117,7 @@ export async function PUT(
             .eq("user_id", user.id)
             .gt("priority", existingContact.priority)
             .lte("priority", priority)
-            .neq("id", params.id);
+            .neq("id", id);
 
           if (contactsToUpdate) {
             for (const contact of contactsToUpdate) {
@@ -145,7 +139,7 @@ export async function PUT(
         priority: priority || existingContact.priority,
         relation: relation || null,
       })
-      .eq("id", params.id)
+      .eq("id", id)
       .eq("user_id", user.id)
       .select()
       .single();
@@ -171,9 +165,10 @@ export async function PUT(
 // DELETE: 연락처 삭제
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const { id } = await params;
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
     
     // Authorization 헤더에서 토큰 가져오기
@@ -209,18 +204,11 @@ export async function DELETE(
       user = cookieUser;
     }
 
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "인증에 실패했습니다." },
-        { status: 401 }
-      );
-    }
-
     // 기존 연락처 정보 가져오기 (우선순위 조정을 위해)
     const { data: existingContact } = await supabase
       .from("emergency_contacts")
       .select("priority")
-      .eq("id", params.id)
+      .eq("id", id)
       .eq("user_id", user.id)
       .single();
 
@@ -228,7 +216,7 @@ export async function DELETE(
     const { error } = await supabase
       .from("emergency_contacts")
       .delete()
-      .eq("id", params.id)
+      .eq("id", id)
       .eq("user_id", user.id);
 
     if (error) {

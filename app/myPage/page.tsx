@@ -130,8 +130,10 @@ export default function MyPagePage() {
 
     setIsDeleting(true);
     try {
+      console.log("계정 삭제 시작:", user.id);
+
       const response = await fetch("/api/delete-account", {
-        method: "POST",
+        method: "DELETE",
         headers: {
           "Content-Type": "application/json",
         },
@@ -139,16 +141,27 @@ export default function MyPagePage() {
       });
 
       const data = await response.json();
+      console.log("계정 삭제 응답:", { status: response.status, data });
 
       if (!response.ok) {
-        throw new Error(data.error || "계정 삭제에 실패했습니다.");
+        const errorMsg = data.error || "계정 삭제에 실패했습니다.";
+        console.error("계정 삭제 실패:", errorMsg, data.details);
+        throw new Error(errorMsg);
       }
+
+      console.log("계정 삭제 성공, 로그아웃 처리 중...");
 
       // 계정 삭제 성공 후 로그아웃 처리
       await signOut();
-      toast.success("계정이 삭제되었습니다.");
       setIsDeleteDialogOpen(false);
+
+      // 홈 화면으로 리다이렉트
       router.push("/");
+
+      // 리다이렉트 후 토스트 메시지 표시
+      setTimeout(() => {
+        toast.success("계정이 삭제되었습니다.");
+      }, 100);
     } catch (err) {
       console.error("계정 삭제 실패:", err);
       const errorMessage =
@@ -156,7 +169,6 @@ export default function MyPagePage() {
           ? err.message
           : "계정 삭제 중 오류가 발생했습니다.";
       toast.error(errorMessage);
-    } finally {
       setIsDeleting(false);
     }
   };
