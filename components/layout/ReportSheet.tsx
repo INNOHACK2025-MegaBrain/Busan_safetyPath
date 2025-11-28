@@ -11,6 +11,7 @@ import {
 import { useUIStore } from "@/store/uiStore";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 const HOLD_DURATION = 3000; // 3초
 
@@ -82,7 +83,12 @@ export default function ReportSheet() {
 
     // 신고 처리 로직
     console.log("신고 완료 - 보호자에게 연락 또는 신고");
-    alert("신고가 접수되었습니다. 보호자에게 연락이 갑니다.");
+
+    // Toast로 알림 표시
+    toast.success("신고가 접수되었습니다", {
+      description: "보호자에게 연락이 갑니다.",
+      duration: 3000,
+    });
 
     setIsHolding(false);
     setProgress(0);
