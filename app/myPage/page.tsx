@@ -4,8 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
-  Phone,
-  FileText,
   Trash2,
   ChevronRight,
   User,
@@ -24,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { useUserStore } from "@/store/userStore";
 import { toast } from "sonner";
+import { supabase } from "@/lib/supabase";
 
 interface ProfileInfo {
   name: string;
@@ -49,17 +48,12 @@ const FALLBACK_PROFILE: ProfileInfo = {
   phone: "010-1234-5678",
   avatarUrl: "/korean-user-avatar.jpg",
 };
-const FALLBACK_CONTACTS: EmergencyContact[] = [
-  { name: "김영희", relation: "어머니", phone: "010-9876-5432", priority: 1 },
-  { name: "이철수", relation: "친구", phone: "010-5555-6666", priority: 2 },
-];
 
 export default function MyPagePage() {
   const router = useRouter();
   const { user, signOut } = useUserStore();
   const [profile, setProfile] = useState<ProfileInfo>(FALLBACK_PROFILE);
-  const [contacts, setContacts] =
-    useState<EmergencyContact[]>(FALLBACK_CONTACTS);
+  const [contacts, setContacts] = useState<EmergencyContact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -89,18 +83,34 @@ export default function MyPagePage() {
         avatarUrl: userAvatar || FALLBACK_PROFILE.avatarUrl,
       });
 
-      // API에서 긴급 연락처 가져오기 (선택적)
+      // API에서 보호자 목록 가져오기
       try {
-        const response = await fetch(API_ENDPOINT, { cache: "no-store" });
-        if (response.ok) {
-          const data = (await response.json()) as MyPagePayload;
-          if (data.contacts && data.contacts.length > 0) {
-            setContacts(data.contacts);
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session?.access_token) {
+          console.warn("[MyPage] 액세스 토큰을 찾을 수 없습니다.");
+          setContacts([]);
+        } else {
+          const response = await fetch(API_ENDPOINT, {
+            cache: "no-store",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          if (response.ok) {
+            const data = (await response.json()) as MyPagePayload;
+            setContacts(data.contacts || []);
+          } else {
+            console.error("[MyPage] 보호자 API 오류", response.status);
+            setContacts([]);
           }
         }
-      } catch {
-        // API 실패해도 기본 연락처 사용
-        console.log("API에서 연락처를 가져오지 못했습니다. 기본값 사용");
+      } catch (apiError) {
+        console.error("[MyPage] 보호자 API 호출 실패", apiError);
+        setContacts([]);
       }
 
       setError(null);
@@ -119,9 +129,6 @@ export default function MyPagePage() {
   const hasAvatarSrc = Boolean(profile.avatarUrl);
   const fallbackInitial = profile.name ? profile.name.charAt(0) : null;
 
-  const handleEmergencySettings = () =>
-    router.push("/myPage/emergency-contacts");
-  const handleReportHistory = () => router.push("/myPage/reports");
   const handleGuardians = () => router.push("/myPage/guardians");
 
   const handleDeleteAccount = async () => {
@@ -229,50 +236,6 @@ export default function MyPagePage() {
         <div className="space-y-2">
           <Card
             className="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-            onClick={handleEmergencySettings}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Phone className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-medium text-foreground">
-                    긴급 연락망 설정
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    비상시 연락할 사람 등록
-                  </p>
-                </div>
-              </div>
-              <ChevronRight className="h-5 w-5 text-muted-foreground" />
-            </div>
-          </Card>
-
-          <Card
-            className="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-            onClick={handleReportHistory}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                  <FileText className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h3 className="font-medium text-foreground">
-                    최근 신고 기록 보기
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    내 신고 내역 확인
-                  </p>
-                </div>
-              </div>
-              <ChevronRight className="h-5 w-5 text-muted-foreground" />
-            </div>
-          </Card>
-
-          <Card
-            className="p-4 cursor-pointer hover:bg-muted/50 transition-colors"
             onClick={handleGuardians}
           >
             <div className="flex items-center justify-between">
@@ -293,13 +256,11 @@ export default function MyPagePage() {
         </div>
 
         <Card className="p-4">
-          <h3 className="font-semibold text-foreground mb-3">
-            등록된 긴급 연락처
-          </h3>
+          <h3 className="font-semibold text-foreground mb-3">등록된 보호자</h3>
           <div className="space-y-3">
             {isLoading ? (
               <p className="text-sm text-muted-foreground">
-                연락처 정보를 불러오는 중입니다...
+                보호자 정보를 불러오는 중입니다...
               </p>
             ) : contacts.length ? (
               contacts.map((contact, index) => {
@@ -336,7 +297,7 @@ export default function MyPagePage() {
               })
             ) : (
               <p className="text-sm text-muted-foreground">
-                등록된 긴급 연락처가 없습니다.
+                등록된 보호자가 없습니다.
               </p>
             )}
           </div>
