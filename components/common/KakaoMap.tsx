@@ -269,6 +269,9 @@ export default function BasicMap() {
 
   // 보안등 밀도 계산 및 Zone 오버레이
   useEffect(() => {
+    // heatmap 모드가 아니면 아무것도 안 함
+    if (visualizationMode !== "heatmap") return;
+
     const map = mapInstance || mapRef.current;
     if (!map || !securityLights || securityLights.length === 0) {
       return;
@@ -365,7 +368,7 @@ export default function BasicMap() {
     return () => {
       overlays.forEach((overlay) => overlay.setMap(null));
     };
-  }, [mapInstance, securityLights]);
+  }, [mapInstance, securityLights, visualizationMode]); // visualizationMode 의존성 추가
 
   // 3. [마커 렌더링 헬퍼 함수] - return 문 전에 추가 (370줄 근처, if (loading) 전에)
   const renderMarkers = () => {
@@ -442,6 +445,18 @@ export default function BasicMap() {
               lng: centerPos.getLng(),
             });
           }}
+          onZoomChanged={(map) => {
+            // 클러스터 모드일 때 줌 레벨이 6보다 작으면(더 확대되면) 6으로 제한
+            if (visualizationMode === "cluster") {
+              const currentLevel = map.getLevel();
+              if (currentLevel < 6) {
+                // requestAnimationFrame을 사용하여 즉시 실행
+                requestAnimationFrame(() => {
+                  map.setLevel(6);
+                });
+              }
+            }
+          }}
         >
           {!!currentPosition && (
             <CustomOverlayMap position={currentPosition}>
@@ -473,11 +488,53 @@ export default function BasicMap() {
 
           {/* 클러스터 모드 */}
           {visualizationMode === "cluster" && (
-            <MarkerClusterer averageCenter={true} minLevel={6}>
+            <MarkerClusterer
+              averageCenter={true}
+              minLevel={6}
+              // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수 (기본값 사용해도 됨)
+              // styles: 각 등급별(개수 적음 -> 많음) 스타일 정의
+              styles={[
+                {
+                  // 1단계 (개수가 적을 때)
+                  width: "30px",
+                  height: "30px",
+                  background: "rgba(59, 130, 246, 0.8)", // 파란색 계열
+                  borderRadius: "50%",
+                  color: "#fff",
+                  textAlign: "center",
+                  lineHeight: "30px",
+                  fontWeight: "bold",
+                  border: "1px solid rgba(59, 130, 246, 1)",
+                },
+                {
+                  // 2단계 (개수가 중간일 때)
+                  width: "40px",
+                  height: "40px",
+                  background: "rgba(245, 158, 11, 0.8)", // 주황색 계열
+                  borderRadius: "50%",
+                  color: "#fff",
+                  textAlign: "center",
+                  lineHeight: "40px",
+                  fontWeight: "bold",
+                  border: "1px solid rgba(245, 158, 11, 1)",
+                },
+                {
+                  // 3단계 (개수가 많을 때)
+                  width: "50px",
+                  height: "50px",
+                  background: "rgba(239, 68, 68, 0.8)", // 빨간색 계열
+                  borderRadius: "50%",
+                  color: "#fff",
+                  textAlign: "center",
+                  lineHeight: "50px",
+                  fontWeight: "bold",
+                  border: "1px solid rgba(239, 68, 68, 1)",
+                },
+              ]}
+            >
               {renderMarkers()}
             </MarkerClusterer>
           )}
-
           {/* 마커 모드 */}
           {visualizationMode === "markers" && renderMarkers()}
 
