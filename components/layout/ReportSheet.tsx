@@ -131,6 +131,18 @@ export default function ReportSheet() {
         return false;
       }
 
+      // 보호자에게 푸시 알림 전송
+      const notifyResponse = await fetch("/api/sos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: session.user.id }),
+      });
+
+      if (!notifyResponse.ok) {
+        const notifyData = await notifyResponse.json().catch(() => ({}));
+        console.error("SOS 알림 전송 실패", notifyData);
+      }
+
       return true;
     } catch (error) {
       if (error instanceof GeolocationPositionError) {
