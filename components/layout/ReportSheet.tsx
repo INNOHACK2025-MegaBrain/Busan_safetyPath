@@ -17,40 +17,36 @@ const HOLD_DURATION = 3000; // 3초
 
 export default function ReportSheet() {
   const { isModalOpen, modalType, closeModal } = useUIStore();
-  const [progress, setProgress] = useState(0);
   const [isHolding, setIsHolding] = useState(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [remainingTime, setRemainingTime] = useState(3.0);
+  const [shouldShowToast, setShouldShowToast] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
   const isReportOpen = isModalOpen && modalType === "report";
 
   const handleMouseDown = () => {
     setIsHolding(true);
-    setProgress(0);
+    setRemainingTime(3.0);
 
-    // 3초 타이머
-    timerRef.current = setTimeout(() => {
-      // 3초가 완료되면 progress 바를 한바퀴 완성하는 애니메이션
-      setProgress(0);
+    // 카운트다운 시작 (0.1초마다 업데이트)
+    let timeLeft = HOLD_DURATION;
+    countdownRef.current = setInterval(() => {
+      timeLeft -= 100;
+      const seconds = (timeLeft / 1000).toFixed(1);
+      setRemainingTime(parseFloat(seconds));
 
-      // 애니메이션 시작
-      const animationDuration = 500; // 0.5초 동안 애니메이션
-      const startTime = Date.now();
-
-      const animate = () => {
-        const elapsed = Date.now() - startTime;
-        const newProgress = Math.min((elapsed / animationDuration) * 100, 100);
-        setProgress(newProgress);
-
-        if (newProgress < 100) {
-          intervalRef.current = setTimeout(animate, 10);
-        } else {
-          // 애니메이션 완료 후 신고 처리
-          handleReportComplete();
+      if (timeLeft <= 0) {
+        if (countdownRef.current) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
         }
-      };
+      }
+    }, 100);
 
-      intervalRef.current = setTimeout(animate, 10);
+    // 3초 타이머 시작
+    timerRef.current = setTimeout(() => {
+      handleReportComplete();
     }, HOLD_DURATION);
   };
 
@@ -59,16 +55,12 @@ export default function ReportSheet() {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (intervalRef.current) {
-      clearTimeout(intervalRef.current);
-      intervalRef.current = null;
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
     }
     setIsHolding(false);
-    setProgress(0);
-  };
-
-  const handleMouseLeave = () => {
-    handleMouseUp();
+    setRemainingTime(3.0);
   };
 
   const handleReportComplete = () => {
@@ -76,23 +68,18 @@ export default function ReportSheet() {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (intervalRef.current) {
-      clearTimeout(intervalRef.current);
-      intervalRef.current = null;
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
     }
 
     // 신고 처리 로직
     console.log("신고 완료 - 보호자에게 연락 또는 신고");
 
-    // Toast로 알림 표시
-    toast.success("신고가 접수되었습니다", {
-      description: "보호자에게 연락이 갑니다.",
-      duration: 3000,
-    });
-
     setIsHolding(false);
-    setProgress(0);
-    closeModal();
+    setRemainingTime(3.0);
+    setShouldShowToast(true); // toast 표시 플래그 설정
+    closeModal(); // 모달 닫기
   };
 
   // 컴포넌트 언마운트 시 정리
@@ -101,13 +88,13 @@ export default function ReportSheet() {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
-      if (intervalRef.current) {
-        clearTimeout(intervalRef.current);
+      if (countdownRef.current) {
+        clearInterval(countdownRef.current);
       }
     };
   }, []);
 
-  // 모달이 닫힐 때 progress 초기화
+  // 모달이 닫힐 때 초기화 및 toast 표시
   useEffect(() => {
     if (!isReportOpen) {
       queueMicrotask(() => {
@@ -115,15 +102,24 @@ export default function ReportSheet() {
           clearTimeout(timerRef.current);
           timerRef.current = null;
         }
-        if (intervalRef.current) {
-          clearTimeout(intervalRef.current);
-          intervalRef.current = null;
+        if (countdownRef.current) {
+          clearInterval(countdownRef.current);
+          countdownRef.current = null;
         }
         setIsHolding(false);
-        setProgress(0);
+        setRemainingTime(3.0);
+
+        // 모달이 닫힌 후 toast 표시
+        if (shouldShowToast) {
+          toast.success("신고가 접수되었습니다", {
+            description: "보호자에게 연락이 갑니다.",
+            duration: 3000,
+          });
+          setShouldShowToast(false); // 플래그 초기화
+        }
       });
     }
-  }, [isReportOpen]);
+  }, [isReportOpen, shouldShowToast]);
 
   return (
     <Sheet open={isReportOpen} onOpenChange={(open) => !open && closeModal()}>
@@ -138,87 +134,41 @@ export default function ReportSheet() {
         </SheetHeader>
 
         <div className="mt-8 flex flex-col items-center gap-6 pb-6">
-          {/* 큰 빨간 신고 버튼 with 원형 Progress */}
-          <div className="relative flex items-center justify-center w-40 h-40">
-            {/* 외부 원형 Progress 바 */}
-            <svg
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 -rotate-90"
-              viewBox="0 0 100 100"
-            >
-              {/* 배경 원 */}
-              <circle
-                cx="50"
-                cy="50"
-                r="45"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="8"
-                className="text-muted/20"
-              />
-              {/* Progress 원 - 3초 완료 후에만 표시 */}
-              {isHolding && progress > 0 && (
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="45"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="8"
-                  strokeLinecap="round"
-                  className="text-orange-500"
-                  style={{
-                    transition: "stroke-dashoffset 0.5s ease-out",
-                    willChange: "stroke-dashoffset",
-                  }}
-                  strokeDasharray={`${2 * Math.PI * 45}`}
-                  strokeDashoffset={`${
-                    2 * Math.PI * 45 * (1 - progress / 100)
-                  }`}
-                />
+          {/* 큰 빨간 신고 버튼 */}
+          <div className="flex flex-col items-center justify-center">
+            {/* 남은 시간 표시 (버튼 상단) - 고정된 공간 할당 */}
+            <div className="h-12 w-32 flex items-center justify-center mb-2">
+              {isHolding && (
+                <p className="text-2xl font-bold text-foreground">
+                  {remainingTime.toFixed(1)}초
+                </p>
               )}
-            </svg>
-
-            {/* 신고 버튼 */}
-            <Button
-              onMouseDown={handleMouseDown}
-              onMouseUp={handleMouseUp}
-              onMouseLeave={handleMouseLeave}
-              onTouchStart={handleMouseDown}
-              onTouchEnd={handleMouseUp}
-              className={`
-                relative h-32 w-32 rounded-full bg-destructive hover:bg-destructive/90 
-                border-4 border-destructive shadow-2xl 
-                transition-all duration-200
-                ${isHolding ? "scale-95 shadow-destructive/50" : "scale-100"}
-                active:scale-95
-                flex flex-col items-center justify-center gap-2
-              `}
-              aria-label="신고 버튼 - 3초간 누르세요"
-            >
-              <AlertTriangle className="h-12 w-12 text-destructive-foreground" />
-              <span className="text-destructive-foreground font-bold text-sm">
-                {isHolding && progress === 0
-                  ? "계속 누르세요"
-                  : progress > 0
-                  ? "완료 중..."
-                  : "누르고 있기"}
-              </span>
-              {isHolding && progress === 0 && (
-                <span className="text-destructive-foreground/80 text-xs">
-                  3초간 누르세요
-                </span>
-              )}
-            </Button>
-          </div>
-
-          {/* Progress 텍스트 - 애니메이션 중에만 표시 */}
-          {isHolding && progress > 0 && (
-            <div className="text-center">
-              <p className="text-lg font-semibold text-foreground">
-                {progress.toFixed(0)}% 완료
-              </p>
             </div>
-          )}
+
+            {/* 버튼 컨테이너 - 고정된 크기 */}
+            <div className="h-32 w-32 flex items-center justify-center">
+              <Button
+                onMouseDown={handleMouseDown}
+                onMouseUp={handleMouseUp}
+                onTouchStart={handleMouseDown}
+                onTouchEnd={handleMouseUp}
+                className={`
+                  h-32 w-32 rounded-full bg-destructive hover:bg-destructive/90 
+                  border-4 border-destructive shadow-2xl 
+                  transition-colors duration-200
+                  ${isHolding ? "bg-destructive/90 shadow-destructive/50" : ""}
+                  flex flex-col items-center justify-center gap-2
+                  relative
+                `}
+                aria-label="신고 버튼 - 3초간 누르세요"
+              >
+                <AlertTriangle className="h-12 w-12 text-destructive-foreground" />
+                <span className="text-destructive-foreground font-bold text-sm">
+                  {isHolding ? "계속 누르세요" : "누르고 있기"}
+                </span>
+              </Button>
+            </div>
+          </div>
 
           {/* 취소 버튼 */}
           <Button

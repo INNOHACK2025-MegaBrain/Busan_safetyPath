@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Sheet,
   SheetContent,
@@ -28,22 +28,66 @@ export default function SearchSheet() {
   const [searchQuery, setSearchQuery] = useState("");
   const [results, setResults] = useState<PlaceResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const isSearchOpen = isModalOpen && modalType === "search";
 
-  const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+  // 모달이 닫힐 때 검색 상태 초기화
+  useEffect(() => {
+    if (!isSearchOpen) {
+      setSearchQuery("");
+      setResults([]);
+      setIsSearching(false);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+    }
+  }, [isSearchOpen]);
 
+  // 검색어 변경 시 자동 검색 (debounce)
+  useEffect(() => {
+    if (!isSearchOpen) return;
+
+    // 이전 타이머 취소
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    // 검색어가 비어있으면 결과 초기화
+    if (!searchQuery.trim()) {
+      setResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    // 300ms 후에 검색 실행 (debounce)
     setIsSearching(true);
-    setResults([]);
+    debounceTimerRef.current = setTimeout(() => {
+      handleSearch(searchQuery);
+    }, 300);
+
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [searchQuery, isSearchOpen]);
+
+  const handleSearch = async (query: string) => {
+    if (!query.trim()) {
+      setResults([]);
+      setIsSearching(false);
+      return;
+    }
 
     try {
       // 카카오맵 Places API 사용
       const ps = new kakao.maps.services.Places();
-      
-      ps.keywordSearch(searchQuery, (data, status) => {
+
+      ps.keywordSearch(query, (data, status) => {
         setIsSearching(false);
-        
+
         if (status === kakao.maps.services.Status.OK) {
           const places: PlaceResult[] = data.map((place: any) => ({
             place_name: place.place_name,
@@ -57,11 +101,13 @@ export default function SearchSheet() {
           setResults([]);
         } else {
           console.error("검색 실패:", status);
+          setResults([]);
         }
       });
     } catch (error) {
       console.error("검색 중 오류 발생:", error);
       setIsSearching(false);
+      setResults([]);
     }
   };
 
@@ -70,7 +116,7 @@ export default function SearchSheet() {
       lat: parseFloat(place.y),
       lng: parseFloat(place.x),
     };
-    
+
     setCenter(coord);
     setSelectedEnd(coord);
     setDestinationInfo({
@@ -79,15 +125,24 @@ export default function SearchSheet() {
       road_address_name: place.road_address_name,
       coord,
     });
-    closeModal(); // 검색 Sheet 닫기
-    openModal("route"); // 길찾기 Sheet 열기
+
+    // 검색 상태 초기화
     setSearchQuery("");
     setResults([]);
+    setIsSearching(false);
+
+    closeModal(); // 검색 Sheet 닫기
+    openModal("route"); // 길찾기 Sheet 열기
   };
 
   const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
-      handleSearch();
+      // Enter 키를 누르면 즉시 검색 (debounce 무시)
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+        debounceTimerRef.current = null;
+      }
+      handleSearch(searchQuery);
     }
   };
 
@@ -98,7 +153,7 @@ export default function SearchSheet() {
           <SheetTitle>목적지 검색</SheetTitle>
           <SheetDescription>검색할 장소를 입력하세요</SheetDescription>
         </SheetHeader>
-        
+
         <div className="mt-6 space-y-4">
           {/* 검색 입력 */}
           <div className="flex gap-2">
@@ -114,7 +169,13 @@ export default function SearchSheet() {
               />
             </div>
             <button
-              onClick={handleSearch}
+              onClick={() => {
+                if (debounceTimerRef.current) {
+                  clearTimeout(debounceTimerRef.current);
+                  debounceTimerRef.current = null;
+                }
+                handleSearch(searchQuery);
+              }}
               disabled={isSearching || !searchQuery.trim()}
               className="px-6 py-3 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
@@ -163,4 +224,3 @@ export default function SearchSheet() {
     </Sheet>
   );
 }
-
