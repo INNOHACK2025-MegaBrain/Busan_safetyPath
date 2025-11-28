@@ -2,10 +2,12 @@
 
 import { MapPin, Search } from "lucide-react";
 import { useUIStore } from "@/store/uiStore";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { Button } from "../ui/button";
 
 export default function Header() {
   const { openModal } = useUIStore();
+  const handleSearch = useRequireAuth(() => openModal("search"));
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-sm border-b border-border">
@@ -24,7 +26,7 @@ export default function Header() {
         {/* 검색 버튼 */}
         <div className="flex items-center gap-2">
           <Button
-            onClick={() => openModal("search")}
+            onClick={handleSearch}
             className="p-2 rounded-lg hover:bg-white/10 transition-all duration-300 backdrop-blur-sm"
             variant="outline"
             size="icon"
