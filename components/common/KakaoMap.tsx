@@ -44,6 +44,8 @@ export default function BasicMap() {
     setSafeReturnPaths,
     emergencyBells,
     setEmergencyBells,
+    cctvs,
+    setCctvs,
     setLevel,
   } = useMapStore();
   const { openModal } = useUIStore();
@@ -54,6 +56,7 @@ export default function BasicMap() {
   const abortControllerRef = useRef<AbortController | null>(null);
   const pathAbortControllerRef = useRef<AbortController | null>(null); // 여성 안심 귀갓길용
   const bellAbortControllerRef = useRef<AbortController | null>(null); // 비상벨용
+  const cctvAbortControllerRef = useRef<AbortController | null>(null); // CCTV용
   // 마지막 조회 영역 저장 (중복 요청 방지)
   const lastBoundsRef = useRef<{
     swLat: number;
@@ -205,6 +208,12 @@ export default function BasicMap() {
                 const debugBellData = await debugBellResponse.json();
                 console.log("[지도] 비상벨 데이터 확인:", debugBellData);
               }
+
+              const debugCctvResponse = await fetch(`/api/cctv?debug=true`);
+              if (debugCctvResponse.ok) {
+                const debugCctvData = await debugCctvResponse.json();
+                console.log("[지도] CCTV 데이터 확인:", debugCctvData);
+              }
             } catch (debugError) {
               console.error("[지도] 디버그 API 호출 실패:", debugError);
             }
@@ -230,6 +239,13 @@ export default function BasicMap() {
         const bellAbortController = new AbortController();
         bellAbortControllerRef.current = bellAbortController;
 
+        // CCTV 데이터 가져오기
+        if (cctvAbortControllerRef.current) {
+          cctvAbortControllerRef.current.abort();
+        }
+        const cctvAbortController = new AbortController();
+        cctvAbortControllerRef.current = cctvAbortController;
+
         const pathResponse = await fetch(
           `/api/safe-return-paths?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
           { signal: pathAbortController.signal }
@@ -238,6 +254,11 @@ export default function BasicMap() {
         const bellResponse = await fetch(
           `/api/emergency-bells?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
           { signal: bellAbortController.signal }
+        );
+
+        const cctvResponse = await fetch(
+          `/api/cctv?swLat=${swLat}&swLng=${swLng}&neLat=${neLat}&neLng=${neLng}`,
+          { signal: cctvAbortController.signal }
         );
 
         // 요청이 취소되었으면 처리하지 않음
@@ -274,6 +295,11 @@ export default function BasicMap() {
         if (bellResponse.ok) {
           const bellData = await bellResponse.json();
           setEmergencyBells(bellData.bells || []);
+        }
+
+        if (cctvResponse.ok) {
+          const cctvData = await cctvResponse.json();
+          setCctvs(cctvData.cctvs || []);
         }
       } catch (error) {
         // AbortError는 무시 (의도적인 취소)
@@ -328,6 +354,9 @@ export default function BasicMap() {
       if (bellAbortControllerRef.current) {
         bellAbortControllerRef.current.abort();
       }
+      if (cctvAbortControllerRef.current) {
+        cctvAbortControllerRef.current.abort();
+      }
       kakao.maps.event.removeListener(map, "tilesloaded", handleLoad);
       kakao.maps.event.removeListener(map, "idle", handleIdle);
     };
@@ -335,6 +364,7 @@ export default function BasicMap() {
     setSecurityLights,
     setSafeReturnPaths,
     setEmergencyBells,
+    setCctvs,
     loading,
     mapInstance,
   ]);
@@ -350,6 +380,8 @@ export default function BasicMap() {
       "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%233B82F6%22%20stroke%3D%22%233B82F6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M4%2016v-2.38C4%2011.5%202.97%2010.5%203%208c.03-2.72%201.49-6%204.5-6C9.37%202%2011%203.8%2011%208c0%201.25-.5%202-1.25%202H4.12c.34.6.54%201.28.54%202A2.5%202.5%200%200%201%204%2016z%22%2F%3E%3Cpath%20d%3D%22M20%2020v-2.38c0-2.12%201.03-3.12%201-5.62-.03-2.72-1.49-6-4.5-6C14.63%206%2013%207.8%2013%2012c0%201.25.5%202%201.25%202h5.63c-.34.6-.54%201.28-.54%202a2.5%202.5%200%200%201%20.66%204z%22%2F%3E%3Cpath%20d%3D%22M16%2017h4%22%2F%3E%3Cpath%20d%3D%22M4%2013h4%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
     const bellIcon =
       "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22%23EF4444%22%20stroke%3D%22%23EF4444%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%208a6%206%200%200%201%2012%200c0%207%203%209%203%209H3s3-2%203-9%22%2F%3E%3Cpath%20d%3D%22M10.3%2021a1.94%201.94%200%200%200%203.4%200%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
+    const cctvIcon =
+      "data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2232%22%20height%3D%2232%22%20viewBox%3D%220%200%2032%2032%22%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2216%22%20r%3D%2215%22%20fill%3D%22white%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%222%22%2F%3E%3Cg%20transform%3D%22translate(4%2C4)%22%3E%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2224%22%20height%3D%2224%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%238B5CF6%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M16.75%2012h3.632a1%201%200%200%201%20.894%201.447l-2.034%204.069a1%201%200%200%201-1.708.134l-2.124-2.97%22%2F%3E%3Cpath%20d%3D%22M17.106%209.053a1%201%200%200%201%20.447%201.341l-3.106%206.211a1%201%200%200%201-1.342.447L3.61%2012.3a2.92%202.92%200%200%201-1.3-3.91L3.69%205.6a2.92%202.92%200%200%201%203.92-1.3z%22%2F%3E%3Cpath%20d%3D%22M2%2019h3.76a2%202%200%200%200%201.8-1.1L9%2015%22%2F%3E%3Cpath%20d%3D%22M2%2021v-4%22%2F%3E%3Cpath%20d%3D%22M7%209h.01%22%2F%3E%3C%2Fsvg%3E%3C%2Fg%3E%3C%2Fsvg%3E";
 
     // 보안등 마커
     if (securityLights && securityLights.length > 0) {
@@ -431,6 +463,27 @@ export default function BasicMap() {
       markers.push(...bellMarkers);
     }
 
+    // CCTV 마커 (보라색) - 줌 레벨 5 이하일 때만 표시
+    if (
+      cctvs &&
+      cctvs.length > 0 &&
+      mapInstance &&
+      mapInstance.getLevel() <= 5
+    ) {
+      const cctvMarkers = cctvs.map((cctv) => (
+        <MapMarker
+          key={`cctv-${cctv.id}`}
+          position={{ lat: cctv.latitude, lng: cctv.longitude }}
+          title={`CCTV: ${cctv.address || "위치 정보 없음"}`}
+          image={{
+            src: cctvIcon,
+            size: { width: 32, height: 32 },
+          }}
+        />
+      ));
+      markers.push(...cctvMarkers);
+    }
+
     return markers;
   };
 
@@ -504,9 +557,10 @@ export default function BasicMap() {
           {visualizationMode === "cluster" &&
             (securityLights.length > 0 ||
               safeReturnPaths.length > 0 ||
-              emergencyBells.length > 0) && (
+              emergencyBells.length > 0 ||
+              cctvs.length > 0) && (
               <MarkerClusterer
-                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}-${emergencyBells.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
+                key={`cluster-${visualizationMode}-${securityLights.length}-${safeReturnPaths.length}-${emergencyBells.length}-${cctvs.length}`} // key를 더 구체적으로 설정하여 확실히 리렌더링
                 averageCenter={true}
                 minLevel={1} // 줌 레벨 제한 해제 (모든 레벨에서 클러스터링 동작하되, 확대 시 마커가 보임)
                 // calculator: 클러스터의 개수에 따라 등급(index)을 매기는 함수
@@ -567,11 +621,13 @@ export default function BasicMap() {
           {visualizationMode === "heatmap" &&
             (securityLights.length > 0 ||
               safeReturnPaths.length > 0 ||
-              emergencyBells.length > 0) && (
+              emergencyBells.length > 0 ||
+              cctvs.length > 0) && (
               <HeatmapLayer
                 data={securityLights}
                 safeReturnPaths={safeReturnPaths}
                 emergencyBells={emergencyBells}
+                cctvs={cctvs}
               />
             )}
 

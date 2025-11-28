@@ -48,6 +48,12 @@ interface MapStore {
     location?: string;
     category?: string;
   }>; // 비상벨 정보
+  cctvs: Array<{
+    id: string;
+    latitude: number;
+    longitude: number;
+    address?: string;
+  }>; // CCTV 정보
   weights: {
     cctv: number;
     crime: number;
@@ -65,6 +71,7 @@ interface MapStore {
   setSecurityLights: (lights: MapStore["securityLights"]) => void;
   setSafeReturnPaths: (paths: MapStore["safeReturnPaths"]) => void;
   setEmergencyBells: (bells: MapStore["emergencyBells"]) => void;
+  setCctvs: (cctvs: MapStore["cctvs"]) => void;
   setWeight: (key: keyof MapStore["weights"], value: number) => void;
   resetSelectedPoints: () => void;
 }
@@ -79,6 +86,7 @@ export const useMapStore = create<MapStore>((set) => ({
   securityLights: [],
   safeReturnPaths: [],
   emergencyBells: [],
+  cctvs: [],
   weights: {
     cctv: 1,
     crime: 1,
@@ -109,6 +117,7 @@ export const useMapStore = create<MapStore>((set) => ({
     set({ safeReturnPaths: paths }),
   setEmergencyBells: (bells: MapStore["emergencyBells"]) =>
     set({ emergencyBells: bells }),
+  setCctvs: (cctvs: MapStore["cctvs"]) => set({ cctvs }),
 
   setWeight: (key, value) =>
     set((state) => ({

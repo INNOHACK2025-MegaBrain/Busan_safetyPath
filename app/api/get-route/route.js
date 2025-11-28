@@ -270,10 +270,10 @@ export async function POST(request) {
         });
 
         if (hasBbox) {
-          // DB에서 해당 영역 내 보안등 조회 (약간의 버퍼 추가)
+          // DB에서 해당 영역 내 보안 요소 조회 (약간의 버퍼 추가)
           const buffer = 0.003; // 약 300m
 
-          // 1. 보안등 데이터 조회
+          // 1. 보안등 데이터 조회 (가중치 최하)
           const { data: lights, error: lightsError } = await supabase
             .from("security_lights")
             .select("latitude, longitude")
@@ -282,7 +282,7 @@ export async function POST(request) {
             .gte("longitude", minLng - buffer)
             .lte("longitude", maxLng + buffer);
 
-          // 2. 안심 귀갓길 데이터 조회
+          // 2. 안심 귀갓길 데이터 조회 (가중치 2순위)
           const { data: safePaths, error: safePathsError } = await supabase
             .from("women_safe_return_paths")
             .select(
@@ -300,26 +300,50 @@ export async function POST(request) {
               })`
             );
 
+          // 3. 비상벨 데이터 조회 (가중치 3순위) - safe_return_paths 테이블 사용
+          const { data: bells, error: bellsError } = await supabase
+            .from("safe_return_paths")
+            .select("latitude, longitude")
+            .gte("latitude", minLat - buffer)
+            .lte("latitude", maxLat + buffer)
+            .gte("longitude", minLng - buffer)
+            .lte("longitude", maxLng + buffer);
+
+          // 4. CCTV 데이터 조회 (가중치 1순위 - 가장 높음)
+          const { data: cctvs, error: cctvsError } = await supabase
+            .from("cctv_installations")
+            .select("latitude, longitude")
+            .gte("latitude", minLat - buffer)
+            .lte("latitude", maxLat + buffer)
+            .gte("longitude", minLng - buffer)
+            .lte("longitude", maxLng + buffer);
+
           if (lightsError) console.error("보안등 조회 에러:", lightsError);
           if (safePathsError)
             console.error("안심 귀갓길 조회 에러:", safePathsError);
+          if (bellsError) console.error("비상벨 조회 에러:", bellsError);
+          if (cctvsError) console.error("CCTV 조회 에러:", cctvsError);
 
           const hasLights = !lightsError && lights && lights.length > 0;
           const hasSafePaths =
             !safePathsError && safePaths && safePaths.length > 0;
+          const hasBells = !bellsError && bells && bells.length > 0;
+          const hasCctvs = !cctvsError && cctvs && cctvs.length > 0;
 
-          if (hasLights || hasSafePaths) {
+          if (hasLights || hasSafePaths || hasBells || hasCctvs) {
             console.log(
-              `[Route] 조회된 보안등 개수: ${
-                lights?.length || 0
-              }, 안심 귀갓길 개수: ${safePaths?.length || 0}`
+              `[Route] 조회된 요소 - 보안등: ${lights?.length || 0}, 안심길: ${
+                safePaths?.length || 0
+              }, 비상벨: ${bells?.length || 0}, CCTV: ${cctvs?.length || 0}`
             );
 
             // 각 경로별 점수 계산
             data.paths.forEach((path) => {
               const points = path.points.coordinates; // [lon, lat] 배열
-              const pathLights = new Set(); // 중복 카운트 방지
-              const pathSafePaths = new Set(); // 중복 카운트 방지
+              const pathLights = new Set();
+              const pathSafePaths = new Set();
+              const pathBells = new Set();
+              const pathCctvs = new Set();
 
               // 경로 포인트 샘플링하여 주변 요소 확인
               for (let i = 0; i < points.length; i += 5) {
@@ -330,7 +354,6 @@ export async function POST(request) {
                   for (const light of lights) {
                     const dLat = light.latitude - pLat;
                     const dLng = light.longitude - pLng;
-                    // 0.0005도 ≈ 50m
                     if (dLat * dLat + dLng * dLng < 0.0005 * 0.0005) {
                       pathLights.add(`${light.latitude},${light.longitude}`);
                     }
@@ -340,16 +363,10 @@ export async function POST(request) {
                 // 2. 안심 귀갓길 확인
                 if (hasSafePaths) {
                   for (const safePath of safePaths) {
-                    // 시작점과 끝점 모두 확인 (안심 귀갓길의 양 끝점 주변인지)
-                    // 더 정교하게 하려면 라인과 라인의 거리를 계산해야 하지만,
-                    // 일단은 주요 포인트(시작/끝) 근처를 지나는지로 판단
-
                     const dStartLat = safePath.start_latitude - pLat;
                     const dStartLng = safePath.start_longitude - pLng;
                     const dEndLat = safePath.end_latitude - pLat;
                     const dEndLng = safePath.end_longitude - pLng;
-
-                    // 0.001도 ≈ 100m (안심 귀갓길은 좀 더 넓게 인정)
                     const threshold = 0.001 * 0.001;
 
                     if (
@@ -357,29 +374,55 @@ export async function POST(request) {
                         threshold ||
                       dEndLat * dEndLat + dEndLng * dEndLng < threshold
                     ) {
-                      // 고유 식별자로 좌표 조합 사용
                       pathSafePaths.add(
                         `${safePath.start_latitude},${safePath.start_longitude}`
                       );
                     }
                   }
                 }
+
+                // 3. 비상벨 확인
+                if (hasBells) {
+                  for (const bell of bells) {
+                    const dLat = bell.latitude - pLat;
+                    const dLng = bell.longitude - pLng;
+                    if (dLat * dLat + dLng * dLng < 0.0005 * 0.0005) {
+                      pathBells.add(`${bell.latitude},${bell.longitude}`);
+                    }
+                  }
+                }
+
+                // 4. CCTV 확인
+                if (hasCctvs) {
+                  for (const cctv of cctvs) {
+                    const dLat = cctv.latitude - pLat;
+                    const dLng = cctv.longitude - pLng;
+                    if (dLat * dLat + dLng * dLng < 0.0005 * 0.0005) {
+                      pathCctvs.add(`${cctv.latitude},${cctv.longitude}`);
+                    }
+                  }
+                }
               }
 
-              // 점수 할당
-              // 보안등 1개당 1점
-              // 안심 귀갓길 1개당 10점 (가중치를 높게 부여)
+              // 점수 할당 (요청사항에 따른 가중치 부여)
+              // CCTV (가장 높음) > 안심귀갓길 > 비상벨 > 보안등
+              // 예시: CCTV(50), 안심길(30), 비상벨(20), 보안등(5)
               path.securityScore =
-                pathLights.size * 1 + pathSafePaths.size * 10;
+                pathCctvs.size * 50 +
+                pathSafePaths.size * 30 +
+                pathBells.size * 20 +
+                pathLights.size * 5;
 
               // 디버깅용 정보 추가
               path.debugInfo = {
-                lightsCount: pathLights.size,
+                cctvCount: pathCctvs.size,
                 safePathsCount: pathSafePaths.size,
+                bellsCount: pathBells.size,
+                lightsCount: pathLights.size,
               };
             });
 
-            // 보안등 점수가 높은 순으로 정렬
+            // 보안 점수가 높은 순으로 정렬
             data.paths.sort(
               (a, b) => (b.securityScore || 0) - (a.securityScore || 0)
             );
