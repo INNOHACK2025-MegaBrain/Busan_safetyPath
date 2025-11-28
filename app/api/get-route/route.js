@@ -61,7 +61,8 @@ export async function POST(request) {
     }
 
     // 4. 도커에 떠있는 GraphHopper 서버 주소
-    const graphHopperUrl = "http://127.0.0.1:8989/route";
+    const graphHopperUrl =
+      "https://zenia-financial-luvenia.ngrok-free.dev/route";
 
     // 5. GraphHopper에 보낼 데이터 (여기가 핵심!)
     const payload = {
