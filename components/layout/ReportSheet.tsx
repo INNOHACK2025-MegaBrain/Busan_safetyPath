@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Sheet,
   SheetContent,
@@ -12,6 +12,8 @@ import { useUIStore } from "@/store/uiStore";
 import { AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
+import { useMapStore } from "@/store/mapStore";
+import { supabase } from "@/lib/supabase";
 
 const HOLD_DURATION = 3000; // 3초
 
@@ -20,8 +22,10 @@ export default function ReportSheet() {
   const [isHolding, setIsHolding] = useState(false);
   const [remainingTime, setRemainingTime] = useState(3.0);
   const [shouldShowToast, setShouldShowToast] = useState(false);
+  const [isSendingSOS, setIsSendingSOS] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
+  const { currentPosition, setCurrentPosition } = useMapStore();
 
   const isReportOpen = isModalOpen && modalType === "report";
 
@@ -63,7 +67,86 @@ export default function ReportSheet() {
     setRemainingTime(3.0);
   };
 
-  const handleReportComplete = () => {
+  const resolveCurrentCoords = useCallback(async () => {
+    if (currentPosition) {
+      return { ...currentPosition };
+    }
+
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      throw new Error("위치 서비스를 사용할 수 없습니다.");
+    }
+
+    return await new Promise<{ lat: number; lng: number; accuracy?: number }>(
+      (resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            const coords = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+            };
+            setCurrentPosition({ lat: coords.lat, lng: coords.lng });
+            resolve(coords);
+          },
+          (error) => {
+            reject(error);
+          },
+          { enableHighAccuracy: true, timeout: 10_000 }
+        );
+      }
+    );
+  }, [currentPosition, setCurrentPosition]);
+
+  const triggerSOS = useCallback(async () => {
+    if (isSendingSOS) return false;
+    setIsSendingSOS(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        toast.error("로그인이 필요합니다.");
+        return false;
+      }
+
+      const coords = await resolveCurrentCoords();
+      const response = await fetch("/api/guardians/sos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          latitude: coords.lat,
+          longitude: coords.lng,
+          accuracy: coords.accuracy ?? null,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const message = data.error || "SOS 전송에 실패했습니다.";
+        toast.error(message);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof GeolocationPositionError) {
+        toast.error("위치 정보를 가져오지 못했습니다. 설정을 확인해주세요.");
+      } else if (error instanceof Error) {
+        toast.error(error.message);
+      } else {
+        toast.error("예상치 못한 오류가 발생했습니다.");
+      }
+      return false;
+    } finally {
+      setIsSendingSOS(false);
+    }
+  }, [isSendingSOS, resolveCurrentCoords]);
+
+  const handleReportComplete = async () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -78,7 +161,8 @@ export default function ReportSheet() {
 
     setIsHolding(false);
     setRemainingTime(3.0);
-    setShouldShowToast(true); // toast 표시 플래그 설정
+    const sosSent = await triggerSOS();
+    setShouldShowToast(sosSent);
     closeModal(); // 모달 닫기
   };
 
@@ -111,9 +195,9 @@ export default function ReportSheet() {
 
         // 모달이 닫힌 후 toast 표시
         if (shouldShowToast) {
-          toast.success("신고가 접수되었습니다", {
-            description: "보호자에게 연락이 갑니다.",
-            duration: 3000,
+          toast.success("SOS가 전송되었습니다", {
+            description: "연결된 보호자에게 일시적으로 위치가 공유됩니다.",
+            duration: 3500,
           });
           setShouldShowToast(false); // 플래그 초기화
         }
