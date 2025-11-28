@@ -103,70 +103,94 @@ export default function SearchSheet() {
       return;
     }
 
+    setIsSearching(true);
+
     try {
-      // 카카오맵 Places API 사용
       const ps = new kakao.maps.services.Places();
+      const geocoder = new kakao.maps.services.Geocoder();
 
-      ps.keywordSearch(query, async (data, status) => {
-        setIsSearching(false);
+      // 키워드 검색 옵션 설정
+      const keywordOptions: any = {};
+      if (currentPosition) {
+        keywordOptions.location = new kakao.maps.LatLng(
+          currentPosition.lat,
+          currentPosition.lng
+        );
+        keywordOptions.radius = 20000; // 20km 반경 우선 검색
+        keywordOptions.sort = kakao.maps.services.SortBy.ACCURACY; // 정확도순 (거리는 이미 필터링)
+      }
 
-        if (status === kakao.maps.services.Status.OK) {
-          let places: PlaceResult[] = data.map((place: any) => ({
-            place_name: place.place_name,
-            address_name: place.address_name,
-            road_address_name: place.road_address_name,
-            x: place.x,
-            y: place.y,
-          }));
-
-          // 현재 위치가 있으면 거리순으로 정렬
-          if (currentPosition) {
-            places = places
-              .map((place) => {
-                const distance = calculateDistance(
-                  currentPosition.lat,
-                  currentPosition.lng,
-                  parseFloat(place.y),
-                  parseFloat(place.x)
-                );
-                return { ...place, distance };
-              })
-              .sort((a, b) => (a.distance || 0) - (b.distance || 0))
-              .map(({ distance, ...place }) => place); // distance 제거
-          }
-
-          setResults(places);
-        } else if (status === kakao.maps.services.Status.ZERO_RESULT) {
-          // 키워드 검색 결과가 없으면 주소 검색 시도
-          try {
-            const geocoder = new kakao.maps.services.Geocoder();
-            geocoder.addressSearch(query, (result, addrStatus) => {
-              if (addrStatus === kakao.maps.services.Status.OK) {
-                const addressPlaces: PlaceResult[] = result.map((addr: any) => ({
-                  place_name: addr.address_name, // 주소 자체를 장소명으로 사용
-                  address_name: addr.address_name,
-                  road_address_name: addr.road_address?.address_name || "",
-                  x: addr.x,
-                  y: addr.y,
-                }));
-                setResults(addressPlaces);
-              } else {
-                setResults([]);
-              }
-            });
-          } catch (addrError) {
-            console.error("주소 검색 중 오류:", addrError);
-            setResults([]);
-          }
-        } else {
-          console.error("검색 실패:", status);
-          setResults([]);
-        }
+      // 키워드 검색 프로미스
+      const keywordSearchPromise = new Promise<PlaceResult[]>((resolve) => {
+        ps.keywordSearch(
+          query,
+          (data, status) => {
+            if (status === kakao.maps.services.Status.OK) {
+              const places = data.map((place: any) => ({
+                place_name: place.place_name,
+                address_name: place.address_name,
+                road_address_name: place.road_address_name,
+                x: place.x,
+                y: place.y,
+                id: place.id, // 중복 제거용 ID
+              }));
+              resolve(places);
+            } else {
+              resolve([]);
+            }
+          },
+          keywordOptions
+        );
       });
+
+      // 주소 검색 프로미스
+      const addressSearchPromise = new Promise<PlaceResult[]>((resolve) => {
+        geocoder.addressSearch(query, (result, status) => {
+          if (status === kakao.maps.services.Status.OK) {
+            const places = result.map((addr: any) => ({
+              place_name: addr.address_name, // 주소 자체를 장소명으로 사용
+              address_name: addr.address_name,
+              road_address_name: addr.road_address?.address_name || "",
+              x: addr.x,
+              y: addr.y,
+              id: `addr-${addr.address_name}`, // 주소 검색 결과용 가상 ID
+            }));
+            resolve(places);
+          } else {
+            resolve([]);
+          }
+        });
+      });
+
+      // 두 검색 병렬 실행
+      const [keywordResults, addressResults] = await Promise.all([
+        keywordSearchPromise,
+        addressSearchPromise,
+      ]);
+
+      // 결과 병합 및 중복 제거
+      // 주소 검색 결과를 우선순위로 둠 (사용자가 주소를 입력했을 가능성 고려)
+      const allResults = [...addressResults, ...keywordResults];
+
+      // 중복 제거 (좌표 기준 - 대략적인 위치가 같으면 같은 장소로 간주)
+      // 또는 ID 기준? 주소 검색은 ID가 없어서 좌표로 하는게 나을수도 있음.
+      // 여기서는 간단히 ID(키워드 검색)와 좌표(주소 검색) 조합으로 필터링
+      const uniqueResults = allResults.filter(
+        (place, index, self) =>
+          index ===
+          self.findIndex(
+            (t) =>
+              (t.id && t.id === place.id) ||
+              (t.x === place.x && t.y === place.y)
+          )
+      );
+
+      setResults(uniqueResults);
     } catch (error) {
       console.error("검색 중 오류 발생:", error);
-      setIsSearching(false);
       setResults([]);
+    } finally {
+      setIsSearching(false);
     }
   };
 
