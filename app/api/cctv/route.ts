@@ -16,7 +16,7 @@ export async function GET(request: Request) {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
 
-    let data = [];
+    let data: any[] | null = [];
     let error = null;
 
     // 범위 지정이 있는 경우 (RPC 사용)

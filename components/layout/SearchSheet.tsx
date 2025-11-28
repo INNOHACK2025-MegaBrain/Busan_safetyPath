@@ -15,6 +15,7 @@ import useKakaoLoader from "@/hooks/useKakaoLoader";
 import SearchResults from "./SearchResults";
 
 interface PlaceResult {
+  id?: string; // unique ID (kakao place id or address id)
   place_name: string;
   address_name: string;
   road_address_name?: string;
