@@ -232,7 +232,7 @@ export default function SearchSheet() {
 
   return (
     <Sheet open={isSearchOpen} onOpenChange={(open) => !open && closeModal()}>
-      <SheetContent side="top" className="h-[80vh] flex flex-col">
+      <SheetContent side="top" className="h-[80vh] flex flex-col top-16">
         <SheetHeader className="shrink-0">
           <SheetTitle>목적지 검색</SheetTitle>
           <SheetDescription>검색할 장소를 입력하세요</SheetDescription>

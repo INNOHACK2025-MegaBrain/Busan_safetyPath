@@ -14,11 +14,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: "안심 귀가 서비스",
-  description: "안전한 귀갓길을 위한 지도 서비스",
+export const metadata = {
+  title: "안심 귀갓길",
+  description: "가장 안전한 경로를 안내합니다.",
+  manifest: "/manifest.json", // [핵심] 여기에 연결!
+  themeColor: "#22C55E", // [핵심] 안드로이드 상태바 색상
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1, // 모바일에서 지도 확대/축소 시 실수로 화면 전체가 커지는 것 방지
+    userScalable: false,
+  },
+  // iOS용 설정 (아이폰 홈 화면 추가 시 필요)
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "안심귀가",
+  },
 };
-
 export default function RootLayout({
   children,
 }: Readonly<{
