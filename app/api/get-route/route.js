@@ -74,6 +74,7 @@ export async function POST(request) {
       calc_points: true,
       points_encoded: false, // 좌표를 압축하지 말고 다 달라고 함
       "ch.disable": true, // 커스텀 모델(가중치)을 쓰기 위해 필수
+      details: ["road_class"], // 도로 등급 정보 요청
       // alternative_route 설정을 Body에 포함 (더 확실한 적용)
       algorithm: "alternative_route",
       "alternative_route.max_paths": 3, // 최대 3개 경로 요청
@@ -345,6 +346,39 @@ export async function POST(request) {
               const pathBells = new Set();
               const pathCctvs = new Set();
 
+              // 0. 대로 효율성 (큰 도로 비율 계산)
+              let majorRoadLength = 0;
+              let totalDistance = path.distance; // 미터 단위
+
+              if (path.details && path.details.road_class) {
+                path.details.road_class.forEach((segment) => {
+                  const [fromIndex, toIndex, roadClass] = segment;
+                  // segment의 길이 계산 (points 배열 사용)
+                  // points[fromIndex] ~ points[toIndex] 까지의 거리 합산
+                  // 단순화를 위해 GraphHopper가 제공하는 distances가 있으면 좋겠지만,
+                  // 여기서는 points 좌표로 직접 계산 (약간의 오차 감수)
+                  if (
+                    roadClass === "motorway" ||
+                    roadClass === "trunk" ||
+                    roadClass === "primary" ||
+                    roadClass === "secondary" ||
+                    roadClass === "tertiary"
+                  ) {
+                    let segmentDist = 0;
+                    for (let i = fromIndex; i < toIndex; i++) {
+                      const [lon1, lat1] = points[i];
+                      const [lon2, lat2] = points[i + 1];
+                      segmentDist +=
+                        calculateDistance(lat1, lon1, lat2, lon2) * 1000; // m 단위 변환
+                    }
+                    majorRoadLength += segmentDist;
+                  }
+                });
+              }
+
+              const majorRoadRatio =
+                totalDistance > 0 ? majorRoadLength / totalDistance : 0;
+
               // 경로 포인트 샘플링하여 주변 요소 확인
               for (let i = 0; i < points.length; i += 5) {
                 const [pLng, pLat] = points[i];
@@ -405,13 +439,19 @@ export async function POST(request) {
               }
 
               // 점수 할당 (요청사항에 따른 가중치 부여)
-              // CCTV (가장 높음) > 안심귀갓길 > 비상벨 > 보안등
-              // 예시: CCTV(50), 안심길(30), 비상벨(20), 보안등(5)
-              path.securityScore =
-                pathCctvs.size * 50 +
-                pathSafePaths.size * 30 +
+              // CCTV (35) > 안심귀갓길 (25) > 비상벨 (20) > 보안등 (10)
+              // + 대로 효율성 (최대 500점) - 시간 페널티 (분당 10점)
+              const securityScore =
+                pathCctvs.size * 35 +
+                pathSafePaths.size * 25 +
                 pathBells.size * 20 +
-                pathLights.size * 5;
+                pathLights.size * 10;
+
+              const roadEfficiencyScore = majorRoadRatio * 500; // 큰 도로 비율에 따른 가산점 (최대 500점)
+              const timePenalty = (path.time / 1000 / 60) * 10; // 소요 시간(분) 당 10점 감점
+
+              path.securityScore =
+                securityScore + roadEfficiencyScore - timePenalty;
 
               // 디버깅용 정보 추가
               path.debugInfo = {
@@ -419,6 +459,10 @@ export async function POST(request) {
                 safePathsCount: pathSafePaths.size,
                 bellsCount: pathBells.size,
                 lightsCount: pathLights.size,
+                majorRoadRatio: (majorRoadRatio * 100).toFixed(1) + "%",
+                roadEfficiencyScore: roadEfficiencyScore.toFixed(0),
+                timePenalty: timePenalty.toFixed(0),
+                totalScore: path.securityScore.toFixed(0),
               };
             });
 
