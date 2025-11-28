@@ -7,13 +7,14 @@ import {
   Phone,
   FileText,
   LogOut,
-  Settings,
   ChevronRight,
   User,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useUserStore } from "@/store/userStore";
+import { toast } from "sonner";
 
 interface ProfileInfo {
   name: string;
@@ -46,6 +47,7 @@ const FALLBACK_CONTACTS: EmergencyContact[] = [
 
 export default function MyPagePage() {
   const router = useRouter();
+  const { user, signOut } = useUserStore();
   const [profile, setProfile] = useState<ProfileInfo>(FALLBACK_PROFILE);
   const [contacts, setContacts] =
     useState<EmergencyContact[]>(FALLBACK_CONTACTS);
@@ -55,22 +57,41 @@ export default function MyPagePage() {
   const fetchMyPageData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(API_ENDPOINT, { cache: "no-store" });
-      if (!response.ok) {
-        throw new Error(`API 요청 실패 (status: ${response.status})`);
+      // 로그인된 사용자 정보 가져오기
+      if (!user) {
+        setError("로그인이 필요합니다.");
+        setIsLoading(false);
+        return;
       }
 
-      const data = (await response.json()) as MyPagePayload;
+      // Supabase에서 사용자 메타데이터 가져오기
+      const userMetadata = user.user_metadata || {};
+      const userName =
+        userMetadata.name || user.email?.split("@")[0] || "사용자";
+      const userPhone = userMetadata.phone || user.phone || "";
+      const userAvatar = userMetadata.avatar_url || userMetadata.avatarUrl;
+
+      // 프로필 정보 설정
       setProfile({
-        name: data.profile?.name || FALLBACK_PROFILE.name,
-        phone: data.profile?.phone || FALLBACK_PROFILE.phone,
-        avatarUrl: data.profile?.avatarUrl ?? FALLBACK_PROFILE.avatarUrl,
+        name: userName,
+        phone: userPhone || FALLBACK_PROFILE.phone,
+        avatarUrl: userAvatar || FALLBACK_PROFILE.avatarUrl,
       });
-      setContacts(
-        data.contacts && data.contacts.length
-          ? data.contacts
-          : FALLBACK_CONTACTS
-      );
+
+      // API에서 긴급 연락처 가져오기 (선택적)
+      try {
+        const response = await fetch(API_ENDPOINT, { cache: "no-store" });
+        if (response.ok) {
+          const data = (await response.json()) as MyPagePayload;
+          if (data.contacts && data.contacts.length > 0) {
+            setContacts(data.contacts);
+          }
+        }
+      } catch {
+        // API 실패해도 기본 연락처 사용
+        console.log("API에서 연락처를 가져오지 못했습니다. 기본값 사용");
+      }
+
       setError(null);
     } catch (err) {
       console.error("Failed to load my-page data", err);
@@ -78,7 +99,7 @@ export default function MyPagePage() {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     fetchMyPageData();
@@ -90,7 +111,16 @@ export default function MyPagePage() {
   const handleEmergencySettings = () =>
     router.push("/myPage/emergency-contacts");
   const handleReportHistory = () => router.push("/myPage/reports");
-  const handleLogout = () => router.push("/logout");
+  const handleLogout = async () => {
+    try {
+      await signOut();
+      toast.success("로그아웃되었습니다");
+      router.push("/");
+    } catch (error) {
+      console.error("로그아웃 실패:", error);
+      toast.error("로그아웃 중 오류가 발생했습니다");
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-background">

@@ -15,7 +15,7 @@ import { useUIStore } from "@/store/uiStore";
 import { useUserStore } from "@/store/userStore";
 import { supabase } from "@/lib/supabase";
 import { toast } from "sonner";
-import { Loader2, Mail, Lock, User as UserIcon } from "lucide-react";
+import { Loader2, Mail, Lock, User as UserIcon, Phone } from "lucide-react";
 
 export default function AuthModal() {
   const { isModalOpen, modalType, closeModal } = useUIStore();
